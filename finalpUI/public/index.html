@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SoCTeamup Library Kiosk</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css?v=6">
+  <link rel="stylesheet" href="css/table-styles.css?v=1">
+  <link rel="stylesheet" href="css/checkin-styles.css?v=2">
+  <link rel="stylesheet" href="css/home-3d.css?v=1">
+  <style>
+    /* Glassmorphism Header */
+    .header {
+      background: rgba(255, 255, 255, 0.6) !important;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      box-shadow: 0 8px 32px rgba(14, 165, 233, 0.1);
+    }
+    /* Powered By Footer */
+    .powered-by-footer {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      font-size: 0.85rem;
+      color: rgba(15, 76, 110, 0.7);
+      font-weight: 600;
+      z-index: 1000;
+      pointer-events: none;
+      letter-spacing: 0.5px;
+      font-family: 'Inter', sans-serif;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <img src="jivesna_logo.png?v=2" alt="University Logo" class="logo">
+      <div class="header-info">
+        <div id="mode-indicator" class="mode-indicator demo-mode">🎭 Demo Mode</div>
+      </div>
+    </header>
+
+    <!-- Error Message -->
+    <div id="error-message" class="error-message"></div>
+
+    <!-- Home View -->
+    <div id="view-home" class="view active">
+
+      <!-- Welcome Section -->
+      <div class="welcome-container">
+        <h1 class="welcome-title">Welcome to <span>Punjabi University</span></h1>
+        <p class="welcome-subtitle">Smart Library Kiosk • Tap an option to begin</p>
+      </div>
+
+      <div class="button-grid">
+        <div id="btn-checkout" class="feature-button">
+          <span class="feature-icon">📕</span>
+          <div class="feature-label">Check-Out</div>
+          <div class="feature-desc">Borrow books quickly</div>
+        </div>
+        <div id="btn-checkin" class="feature-button">
+          <span class="feature-icon">📚</span>
+          <div class="feature-label">Check-In</div>
+          <div class="feature-desc">Return items here</div>
+        </div>
+        <div id="btn-account" class="feature-button">
+          <span class="feature-icon">👤</span>
+          <div class="feature-label">My Account</div>
+          <div class="feature-desc">View loans & fines</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- My Account View -->
+    <div id="view-account" class="view">
+      <div class="form-container account-container">
+        <h1 class="form-title">My Account</h1>
+        <form id="account-form">
+          <div class="form-group">
+            <label for="account-card" class="form-label">Patron Card Number</label>
+            <input type="text" id="account-card" class="form-input" placeholder="Enter patron card number" required autocomplete="off">
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="btn btn-secondary btn-cancel">Home</button>
+            <button type="submit" class="btn btn-primary">Search</button>
+          </div>
+        </form>
+
+        <div id="account-results" class="account-results" style="display: none;"></div>
+      </div>
+    </div>
+
+    <!-- Check-Out View -->
+    <div id="view-checkout" class="view">
+      <div class="form-container">
+        <h1 class="form-title">📕 Check-Out</h1>
+        <form id="checkout-form">
+          <div class="form-group">
+            <label for="patron-card" class="form-label">Patron Card Number</label>
+            <input type="text" id="patron-card" class="form-input" placeholder="Enter patron card number" required
+              autocomplete="off">
+            <div id="patron-rfid-status"
+              style="display:none;margin-top:0.75rem;padding:0.7rem 0.9rem;border-radius:12px;background:rgba(14,165,233,0.08);border:1px solid rgba(14,165,233,0.18);color:#0f4c6e;font-size:0.9rem;font-weight:600;">
+              Patron RFID reader: starting...
+            </div>
+            <small style="color: var(--text-muted); display: block; margin-top: 0.5rem;">
+              Demo: Try 11111, 22222, or 33333
+            </small>
+          </div>
+
+          <div class="form-group">
+            <label for="item-barcode" class="form-label">Item Barcode</label>
+            <input type="text" id="item-barcode" class="form-input" placeholder="Scan or enter item barcode" required
+              autocomplete="off">
+            <small style="color: var(--text-muted); display: block; margin-top: 0.5rem;">
+              Demo: Try 123456789, 987654321, or 111222333
+            </small>
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="btn btn-secondary btn-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Submit</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Check-Out Success View -->
+    <div id="view-checkout-success" class="view">
+      <div class="success-container">
+        <div id="checkout-success-details"></div>
+        <div class="form-actions" style="justify-content: center; margin-top: 2rem;">
+          <button type="button" class="btn btn-primary btn-new">New Check-Out</button>
+          <button type="button" class="btn btn-secondary btn-cancel">Home</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Check-In View -->
+    <div id="view-checkin" class="view">
+      <div class="checkin-wrapper">
+        <h1 class="page-title">Book <span>Check-In</span></h1>
+
+        <!-- STEP 1: Place Books -->
+        <div id="checkin-step-place" class="checkin-step">
+          <div class="place-book-anim">
+            <span class="place-book-icon">📖</span>
+            <div class="place-book-text">Place books on reader</div>
+          </div>
+          <button type="button" id="btn-start-scanning" class="btn btn-finish">
+            <span class="icon">🔍</span> Start Scanning
+          </button>
+          <div style="width: 100%; text-align: left; margin-top: 1rem;">
+            <button type="button" class="btn btn-secondary btn-cancel">← Home</button>
+          </div>
+        </div>
+
+        <!-- STEP 2: Scanning in progress -->
+        <div id="checkin-step-scanning" class="checkin-step" style="display: none;">
+          <div class="scanning-anim">
+            <div class="scan-ring"></div>
+            <div class="scan-ring scan-ring-2"></div>
+            <div class="scan-icon">📡</div>
+          </div>
+          <div class="scanning-text">Scanning & Checking In...</div>
+        </div>
+
+        <!-- Hidden form for RFID auto-submit -->
+        <form id="checkin-form" style="display: none;">
+          <input type="text" id="item-barcode-checkin" autocomplete="off">
+          <button type="submit">Submit</button>
+        </form>
+
+        <!-- Card-Based Results -->
+        <div id="checkin-results" class="results-stack"></div>
+
+        <!-- Action Buttons (visible only after scanning starts) -->
+        <div id="checkin-scan-actions" style="display: none; width: 100%;">
+          <div style="display: flex; justify-content: flex-end;">
+            <button type="button" id="btn-done-checkin" class="btn btn-secondary" style="flex: none;">✓ Done</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Thank You View -->
+    <div id="view-thankyou" class="view">
+      <div class="thankyou-container">
+
+        <!-- 3D Book Animation -->
+        <div class="book-3d-scene">
+          <div class="book-3d">
+            <div class="book-cover">
+              <div class="book-spine"></div>
+              <div class="book-front"></div>
+            </div>
+            <div class="book-pages"></div>
+          </div>
+        </div>
+
+        <h1 class="thankyou-title">Success!</h1>
+
+        <p class="thankyou-message">
+          You checked in <span id="session-count" class="count-badge">0</span> items.
+        </p>
+
+        <div class="quote-container">
+          <p id="thankyou-quote" class="quote-text">“Reading is dreaming with open eyes.”</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Check-In Success View -->
+  <div id="view-checkin-success" class="view">
+    <div class="success-container">
+      <div id="checkin-success-details"></div>
+      <div class="form-actions" style="justify-content: center; margin-top: 2rem;">
+        <button type="button" class="btn btn-primary btn-new">New Check-In</button>
+        <button type="button" class="btn btn-secondary btn-cancel">Home</button>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <!-- Powered By Footer -->
+  <div class="powered-by-footer">
+    Powered by SoCTeamup Semiconductors
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/sounds.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/patron-rfid-service.js"></script>
+  <script src="js/rfid-service.js"></script>
+</body>
+
+</html>
