@@ -18,6 +18,9 @@ const CONFIG = {
         branchCode: 'CPL' // Your library branch code (Centerville)
     },
 
+    // OPAC URL for catalog search
+    opacUrl: 'http://164.52.208.94:800',
+
     // UI Configuration
     ui: {
         theme: 'dark', // 'light' or 'dark'

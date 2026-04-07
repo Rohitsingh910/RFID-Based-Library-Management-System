@@ -1,12 +1,12 @@
 const net = require('net');
 
 const CONFIG = {
-  host: '103.86.177.6',
+  host: '164.52.208.94',
   port: 8023,
-  telnetUser: 'rfid',
-  telnetPassword: 'Rfid@#123',
-  sipInstitutionId: 'PUPCL',
-  sipPassword: 'Rfid@#123',
+  telnetUser: 'jivesna',
+  telnetPassword: 'library@koha123',
+  sipInstitutionId: 'CPL',
+  sipPassword: 'library@koha123',
   terminator: '\r\n'
 };
 

@@ -84,6 +84,7 @@ body::before {
   max-width: var(--container-width);
   margin: 0 auto;
   padding: 2rem;
+  padding-bottom: 120px; /* Space for the fixed footer */
   flex: 1;
 }
 

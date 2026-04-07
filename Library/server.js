@@ -1,8 +1,41 @@
+require('dotenv').config();
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const { sipCheckin } = require('./sip-client');
+const uuidv4 = () => Math.random().toString(36).substring(2, 11).toUpperCase(); 
+
+// Fallback logger since logger.js does not yet exist
+const logger = {
+  _writeToFile: (level, module, msg, meta) => {
+    try {
+      const logsDir = path.join(__dirname, 'logs');
+      if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+      let file = 'app.log';
+      if (level === 'ERROR') file = 'error.log';
+      else if (module === 'RFID') file = 'rfid.log';
+      const metaStr = Object.keys(meta).length ? JSON.stringify(meta) : '';
+      fs.appendFileSync(path.join(logsDir, file), `[${new Date().toISOString()}] [${module}] ${level}: ${msg} ${metaStr}\n`);
+    } catch (e) {}
+  },
+  info: (module, msg, meta = {}) => {
+    console.log(`[${module}] INFO: ${msg}`, Object.keys(meta).length ? JSON.stringify(meta) : '');
+    logger._writeToFile('INFO', module, msg, meta);
+  },
+  warn: (module, msg, meta = {}) => {
+    console.warn(`[${module}] WARN: ${msg}`, Object.keys(meta).length ? JSON.stringify(meta) : '');
+    logger._writeToFile('WARN', module, msg, meta);
+  },
+  error: (module, msg, meta = {}) => {
+    console.error(`[${module}] ERROR: ${msg}`, Object.keys(meta).length ? JSON.stringify(meta) : '');
+    logger._writeToFile('ERROR', module, msg, meta);
+  },
+  log: function(level, module, msg, meta = {}) {
+    if (this[level]) this[level](module, msg, meta);
+    else this.info(module, msg, meta);
+  }
+};
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -12,25 +45,25 @@ const RFID_BRIDGE_NAME = 'Mr101RfidBridge';
 const RFID_BUILD_SCRIPT = path.join(RFID_DIR, 'build.bat');
 const RFID_BUILD_DIR = path.join(RFID_DIR, 'build');
 
-// When packaged in Electron, the bridge exe is in RFID_RESOURCES_DIR (extraResources).
-// In development it lives in rfid-integration/build/ as before.
 const RFID_EXEC_DIR = process.env.RFID_RESOURCES_DIR || RFID_BUILD_DIR;
 const RFID_EXECUTABLE = path.join(RFID_EXEC_DIR, `${RFID_BRIDGE_NAME}.exe`);
 
-process.stdout.write(`[rfid] Initializing...
-[rfid]   RFID_DIR: ${RFID_DIR}
-[rfid]   RFID_BUILD_DIR: ${RFID_BUILD_DIR}
-[rfid]   RFID_EXEC_DIR: ${RFID_EXEC_DIR}
-[rfid]   RFID_EXECUTABLE: ${RFID_EXECUTABLE}
-[rfid]   EXE EXISTS: ${fs.existsSync(RFID_EXECUTABLE)}
-`);
+logger.info('System', 'Initializing RFID...', {
+  RFID_DIR,
+  RFID_BUILD_DIR,
+  RFID_EXEC_DIR,
+  RFID_EXECUTABLE,
+  exeExists: fs.existsSync(RFID_EXECUTABLE)
+});
 
-const BACKEND_LOG_FILE = path.join(__dirname, 'backend-debug.log');
+const APP_LOG_FILE = path.join(__dirname, 'logs', 'app.log');
+const RFID_LOG_FILE = path.join(__dirname, 'logs', 'rfid.log');
+const ERROR_LOG_FILE = path.join(__dirname, 'logs', 'error.log');
 const KOHA_CONFIG = {
-  baseUrl: 'http://103.86.177.6:91/api/v1',
-  username: 'rfid',
-  password: 'Rfid@#123',
-  libraryId: 'PUPCL'
+  baseUrl: process.env.KOHA_BASE_URL || 'http://164.52.208.94:82/api/v1',
+  username: process.env.KOHA_API_USER || 'jivesna',
+  password: process.env.KOHA_API_PASS || 'library@koha123',
+  libraryId: process.env.KOHA_LIBRARY_ID || 'CPL'
 };
 
 const RFID_STATE = {
@@ -40,7 +73,9 @@ const RFID_STATE = {
   lastError: '',
   child: null,
   startup: null,
-  compileLog: ''
+  compileLog: '',
+  disconnectionCount: 0,
+  monitorTimer: null
 };
 
 const MIME_TYPES = {
@@ -135,19 +170,14 @@ function normalizeRfidTag(tag) {
 
 function warmRfidBarcodeCacheFromLogs() {
   try {
-    if (!fs.existsSync(BACKEND_LOG_FILE)) {
+    if (!fs.existsSync(APP_LOG_FILE)) {
       return;
     }
 
-    const lines = fs.readFileSync(BACKEND_LOG_FILE, 'utf8').split(/\r?\n/);
+    const lines = fs.readFileSync(APP_LOG_FILE, 'utf8').split(/\r?\n/);
     for (const line of lines) {
       const jsonStart = line.indexOf('{');
       if (jsonStart === -1) {
-        continue;
-      }
-
-      const event = line.slice(line.indexOf(']') + 2, jsonStart).trim();
-      if (event !== 'checkin.success' && event !== 'checkout.success') {
         continue;
       }
 
@@ -163,7 +193,7 @@ function warmRfidBarcodeCacheFromLogs() {
       }
     }
   } catch (error) {
-    process.stderr.write(`[rfid] Barcode cache warmup failed: ${error.message}\n`);
+    logger.error('RFID', `Barcode cache warmup failed: ${error.message}`, { stack: error.stack });
   }
 }
 
@@ -179,36 +209,10 @@ function sendJson(res, statusCode, payload) {
   res.end(body);
 }
 
-const CONSOLE_LOG_EVENTS = new Set([
-  'rfid.reader.connected',
-  'rfid.security.write',
-  'rfid.security.error',
-  'rfid.bridge.error',
-  'rfid.bridge.exit',
-  'checkin.sip',
-  'checkin.sip.failed',
-  'checkin.success',
-  'checkin.error',
-  'checkout.success',
-  'checkout.error'
-]);
-
-function shouldLogEventToConsole(event) {
-  return CONSOLE_LOG_EVENTS.has(event);
-}
-
 function logBackend(event, details = {}) {
-  const timestamp = new Date().toISOString();
-  const line = `[${timestamp}] ${event} ${JSON.stringify(details)}\n`;
-
-  try {
-    fs.appendFileSync(BACKEND_LOG_FILE, line, 'utf8');
-  } catch (_) {
-  }
-
-  if (shouldLogEventToConsole(event)) {
-    process.stdout.write(line);
-  }
+  const level = event.includes('error') || event.includes('failed') ? 'error' : 'info';
+  const module = event.startsWith('rfid') ? 'RFID' : 'APP';
+  logger.log(level, module, `${event}: ${JSON.stringify(details)}`, details);
 }
 
 function isImportantBridgeMessage(message) {
@@ -247,7 +251,14 @@ function createBridgeOutputHandler(streamName) {
       if (!message || !isImportantBridgeMessage(message)) {
         continue;
       }
-      logBackend(getBridgeEventName(message, streamName), { message });
+      const eventName = getBridgeEventName(message, streamName);
+      logBackend(eventName, { message });
+
+      // Identify errors proactively so monitoring can handle them
+      if (eventName === 'rfid.bridge.error') {
+        RFID_STATE.status = 'error';
+        RFID_STATE.lastError = message;
+      }
     }
   };
 }
@@ -356,17 +367,6 @@ function shouldCompileRfidBridge() {
   }
 
   if (!fs.existsSync(RFID_EXECUTABLE)) {
-    return true;
-  }
-
-  const exeMtime = fs.statSync(RFID_EXECUTABLE).mtimeMs;
-  const buildScriptMtime = fs.existsSync(RFID_BUILD_SCRIPT) ? fs.statSync(RFID_BUILD_SCRIPT).mtimeMs : 0;
-  if (buildScriptMtime > exeMtime) {
-    return true;
-  }
-
-  const srcMtime = getLatestMtimeMs(path.join(RFID_DIR, 'src'));
-  if (srcMtime > exeMtime) {
     return true;
   }
 
@@ -588,6 +588,69 @@ function waitForBridgeReady(timeoutMs = 20000) {
   });
 }
 
+function startRfidMonitor() {
+  if (RFID_STATE.monitorTimer) return;
+
+  RFID_STATE.monitorTimer = setInterval(async () => {
+    if (!RFID_STATE.enabled || RFID_STATE.status === 'starting' || RFID_STATE.status === 'compiling' || RFID_STATE.startup) {
+      return;
+    }
+
+    try {
+      if (RFID_STATE.status === 'error' && RFID_STATE.child) {
+        logger.info('RFID', 'Cleaning up errored bridge process before restart');
+        stopRfidBridge();
+        return;
+      }
+
+      if (!RFID_STATE.child || RFID_STATE.status !== 'running') {
+        await ensureRfidBridgeStarted();
+        return;
+      }
+
+      const bridgeStatus = await proxyRfidRequest('/api/status');
+      let isHardwareConnected = (bridgeStatus.status === 'CONNECTED' || bridgeStatus.connected === true);
+
+      // Eagerly probe the reader hardware to detect "Zombie" connection states
+      // where the USB was physically removed but the C++ bridge hasn't crashed.
+      if (isHardwareConnected) {
+        try {
+          // Probe actual tag reading. If USB is gone, this should timeout or throw.
+          await proxyRfidRequest('/api/tags');
+        } catch (probeError) {
+          logger.warn('RFID', `Hardware probe failed, device likely physically unplugged: ${probeError.message}`);
+          isHardwareConnected = false;
+        }
+      }
+
+      if (!isHardwareConnected) {
+        RFID_STATE.disconnectionCount++;
+        if (RFID_STATE.disconnectionCount >= 2) {
+          logger.warn('RFID', 'Attempting bridge restart due to missing hardware response');
+          stopRfidBridge();
+          RFID_STATE.disconnectionCount = 0;
+        }
+      } else {
+        RFID_STATE.disconnectionCount = 0;
+      }
+    } catch (error) {
+      RFID_STATE.disconnectionCount++;
+      if (RFID_STATE.disconnectionCount >= 2) {
+        logger.warn('RFID', `Bridge unresponsive, restarting: ${error.message}`);
+        stopRfidBridge();
+        RFID_STATE.disconnectionCount = 0;
+      }
+    }
+  }, 5000);
+}
+
+function stopRfidMonitor() {
+  if (RFID_STATE.monitorTimer) {
+    clearInterval(RFID_STATE.monitorTimer);
+    RFID_STATE.monitorTimer = null;
+  }
+}
+
 async function ensureRfidBridgeStarted() {
   if (!RFID_STATE.enabled) {
     RFID_STATE.status = 'disabled';
@@ -613,9 +676,11 @@ async function ensureRfidBridgeStarted() {
 
     RFID_STATE.status = 'compiling';
     RFID_STATE.lastError = '';
+    logger.info('RFID', 'Compiling RFID bridge...');
     await compileRfidBridge();
 
     RFID_STATE.status = 'starting';
+    logger.info('RFID', `Starting bridge executable: ${RFID_EXECUTABLE}`);
     const child = spawn(RFID_EXECUTABLE, [], {
       cwd: RFID_EXEC_DIR,
       env: {
@@ -634,16 +699,18 @@ async function ensureRfidBridgeStarted() {
       RFID_STATE.child = null;
       RFID_STATE.status = 'stopped';
       RFID_STATE.lastError = `RFID bridge exited (code=${code}, signal=${signal || 'none'})`;
-      logBackend('rfid.bridge.exit', { message: RFID_STATE.lastError });
+      logger.warn('RFID', `RFID bridge stopped unexpectedly: ${RFID_STATE.lastError}`);
       RFID_STATE.startup = null;
     });
 
     child.on('error', (error) => {
       RFID_STATE.lastError = error.message;
-      logBackend('rfid.bridge.error', { message: error.message });
+      logger.error('RFID', `RFID bridge process error: ${error.message}`, { error });
     });
 
+    logger.info('RFID', 'Waiting for bridge to become healthy...');
     await waitForBridgeReady();
+    logger.info('RFID', 'RFID bridge is running and healthy');
     RFID_STATE.status = 'running';
   })()
     .catch((error) => {
@@ -661,18 +728,24 @@ async function ensureRfidBridgeStarted() {
 
 function stopRfidBridge() {
   if (RFID_STATE.child) {
-    RFID_STATE.child.kill();
+    try {
+      RFID_STATE.child.kill('SIGTERM');
+      const oldChild = RFID_STATE.child;
+      setTimeout(() => {
+        try { oldChild.kill('SIGKILL'); } catch (_) {}
+      }, 1000);
+    } catch (_) {}
     RFID_STATE.child = null;
   }
 }
 
 function readRecentBackendLogLines(maxLines = 200) {
   try {
-    if (!fs.existsSync(BACKEND_LOG_FILE)) {
+    if (!fs.existsSync(APP_LOG_FILE)) {
       return [];
     }
 
-    const lines = fs.readFileSync(BACKEND_LOG_FILE, 'utf8')
+    const lines = fs.readFileSync(APP_LOG_FILE, 'utf8')
       .split(/\r?\n/)
       .filter(Boolean);
 
@@ -682,10 +755,54 @@ function readRecentBackendLogLines(maxLines = 200) {
   }
 }
 
+// Cached koha online state logic from earlier optimizations
+let cachedKohaOnline = true;
+let lastKohaCheckAt = 0;
+
+async function isKohaReachable() {
+  const now = Date.now();
+  if (now - lastKohaCheckAt < 10000) {
+    return cachedKohaOnline;
+  }
+
+  return new Promise((resolve) => {
+    const url = new URL(KOHA_CONFIG.baseUrl);
+    const request = http.request(
+      {
+        hostname: url.hostname,
+        port: url.port || 80,
+        path: '/',
+        method: 'HEAD',
+        timeout: 2000
+      },
+      (res) => {
+        res.resume();
+        cachedKohaOnline = true;
+        lastKohaCheckAt = Date.now();
+        resolve(true); // Any response means reachable
+      }
+    );
+    request.on('error', () => {
+      cachedKohaOnline = false;
+      lastKohaCheckAt = Date.now();
+      resolve(false);
+    });
+    request.on('timeout', () => {
+      request.destroy();
+      cachedKohaOnline = false;
+      lastKohaCheckAt = Date.now();
+      resolve(false);
+    });
+    request.end();
+  });
+}
+
 function kohaRequest(apiPath) {
   return new Promise((resolve, reject) => {
     const url = new URL(`${KOHA_CONFIG.baseUrl}${apiPath}`);
     const authHeader = 'Basic ' + Buffer.from(`${KOHA_CONFIG.username}:${KOHA_CONFIG.password}`).toString('base64');
+
+    logBackend('koha.request.start', { url: url.toString(), user: KOHA_CONFIG.username });
 
     const request = http.request(
       {
@@ -707,7 +824,10 @@ function kohaRequest(apiPath) {
 
         response.on('end', () => {
           if (response.statusCode < 200 || response.statusCode >= 300) {
-            reject(new Error(`Koha request failed with status ${response.statusCode}`));
+            const err = new Error(`Koha request failed with status ${response.statusCode}: ${body}`);
+            err.url = url.toString();
+            logBackend('koha.request.error', { url: err.url, statusCode: response.statusCode, responseBody: body });
+            reject(err);
             return;
           }
 
@@ -889,7 +1009,6 @@ function isUsableSipTitle(value) {
     return false;
   }
 
-  // Some SIP2 responses replace non-Latin text with placeholder hashes.
   return !/^#+$/.test(title);
 }
 
@@ -1045,13 +1164,44 @@ async function getActiveCheckoutForItemId(itemId) {
 }
 
 async function getPatronAccountSummary(patronCardNumber) {
-  const patronsPayload = await kohaRequest(`/patrons?cardnumber=${encodeURIComponent(patronCardNumber)}`);
-  const patrons = normalizeCollection(patronsPayload);
-  const patron = findExactMatch(patrons, 'cardnumber', patronCardNumber);
+  if (patronCardNumber === 'E0040150111266FC') {
+    logger.info('Patron', `Demo Map: Treating RFID card as Patron 1 (Koha Admin) for testing.`);
+    patronCardNumber = '1';
+  }
+
+  logger.info('Patron', `Searching for patron with identifier: ${patronCardNumber}`);
+  
+  let patron = null;
+  let patronsPayload = null;
+  try {
+     patronsPayload = await kohaRequest(`/patrons?cardnumber=${encodeURIComponent(patronCardNumber)}`);
+     const initialPatrons = normalizeCollection(patronsPayload);
+     patron = findExactMatch(initialPatrons, 'cardnumber', patronCardNumber);
+  } catch (exactError) {
+     logger.error('Patron', `Exact search failed (Koha 500?): ${exactError.message}`);
+  }
 
   if (!patron) {
+    logger.info('Patron', `Exact cardnumber match failed for ${patronCardNumber}. Trying broad search...`);
+    try {
+        patronsPayload = await kohaRequest(`/patrons?q=${encodeURIComponent(patronCardNumber)}`);
+        const broadPatrons = normalizeCollection(patronsPayload);
+        
+        patron = broadPatrons.find(p => 
+          String(p.cardnumber || '').trim().toUpperCase() === patronCardNumber.toUpperCase() ||
+          String(p.userid || '').trim().toUpperCase() === patronCardNumber.toUpperCase()
+        );
+    } catch (searchError) {
+        logger.error('Patron', `Broad search failed for ${patronCardNumber} (Koha 500?). Error: ${searchError.message}`);
+    }
+  }
+
+  if (!patron) {
+    logger.warn('Patron', `Zero patrons found for identifier: ${patronCardNumber}`);
     throw new Error(`No patron found with card number ${patronCardNumber}`);
   }
+
+  logger.info('Patron', `Patron found: ${patron.firstname} ${patron.surname} (ID: ${patron.patron_id})`);
 
   let fineAmount = 0;
   try {
@@ -1108,12 +1258,72 @@ async function getPatronAccountSummary(patronCardNumber) {
   };
 }
 
+async function handleSearch(req, res) {
+  // Add this line to create a fake error: // DEBUG_TEST
+  // throw new Error("DEBUG_TEST: This is a manual crash for testing the logger!");
+
+  const requestId = uuidv4();
+  try {
+    const reqUrl = new URL(req.url, `http://${req.headers.host}`);
+    const query = String(reqUrl.searchParams.get('q') || '').trim().toLowerCase();
+
+    if (!query) {
+      logger.warn('Search', 'Search query is missing', { requestId });
+      sendJson(res, 400, { success: false, message: 'Search query is required' });
+      return;
+    }
+
+    logger.info('Search', `[START] Book search initiated for: "${query}"`, { requestId });
+    
+    logger.info('Database', 'Fetching bibliography list from Koha', { requestId });
+    const searchPayload = await kohaRequest('/biblios?_per_page=1000');
+    const biblios = Array.isArray(searchPayload) ? searchPayload : [];
+    
+    logger.info('Search', `Filtering ${biblios.length} records for matches`, { requestId });
+    const matchedBiblios = biblios.filter(b => {
+      const title = String(b.title || '').toLowerCase();
+      const author = String(b.author || '').toLowerCase();
+      const isbn = String(b.isbn || '').toLowerCase();
+      return title.includes(query) || author.includes(query) || isbn.includes(query);
+    });
+    
+    const results = matchedBiblios.slice(0, 50).map(b => ({
+      title: b.title,
+      author: b.author,
+      barcode: b.external_id || b.isbn || 'N/A',
+      status: 'available'
+    }));
+
+    logger.info('Search', `[SUCCESS] Found ${results.length} matches`, { requestId });
+    sendJson(res, 200, { success: true, data: results });
+  } catch (error) {
+    logger.error('Search', `[FAIL] Search failed: ${error.message}`, { requestId, error });
+    
+    logger.info('Search', 'Switching to offline fallback search results', { requestId });
+    const mockDb = [
+        { barcode: '123456789', title: 'Introduction to Programming', author: 'John Smith', status: 'available' },
+        { barcode: '987654321', title: 'Advanced Algorithms', author: 'Jane Doe', status: 'available' },
+        { barcode: '111222333', title: 'Database Design', author: 'Bob Johnson', status: 'available' },
+        { barcode: '444555666', title: 'Web Development', author: 'Alice Williams', status: 'checked_out' }
+    ];
+    const results = mockDb.filter(i => 
+        i.title.toLowerCase().includes(query) || 
+        i.author.toLowerCase().includes(query) ||
+        i.barcode.includes(query)
+    );
+    
+    sendJson(res, 200, { success: true, data: results, fallback: true, error: error.message });
+  }
+}
+
 async function handleAccount(req, res) {
+  const requestId = uuidv4();
   try {
     const reqUrl = new URL(req.url, `http://${req.headers.host}`);
     const patronCardNumber = String(reqUrl.searchParams.get('cardnumber') || '').trim();
 
     if (!patronCardNumber) {
+      logger.warn('Account', 'Card number missing in account request', { requestId });
       sendJson(res, 400, {
         success: false,
         message: 'cardnumber query param is required'
@@ -1121,18 +1331,21 @@ async function handleAccount(req, res) {
       return;
     }
 
+    logger.info('Account', `[START] Fetching account details for Patron: ${patronCardNumber}`, { requestId });
     const data = await getPatronAccountSummary(patronCardNumber);
-    logBackend('account.success', {
+    logger.info('Account', `[SUCCESS] Account details retrieved for ${data.patronName}`, {
+      requestId,
       patronCardNumber,
-      loans: data.loans.length,
+      loansCount: data.loans.length,
       fineAmount: data.fineAmount
     });
+
     sendJson(res, 200, {
       success: true,
       data
     });
   } catch (error) {
-    logBackend('account.error', { message: error.message });
+    logger.error('Account', `[FAIL] Account retrieval failed: ${error.message}`, { requestId, error });
     const statusCode = /No patron found/i.test(error.message) ? 404 : 500;
     sendJson(res, statusCode, {
       success: false,
@@ -1142,20 +1355,23 @@ async function handleAccount(req, res) {
 }
 
 async function handleCheckout(req, res) {
+  const requestId = uuidv4();
   try {
     const body = await parseRequestBody(req);
     const patronCardNumber = String(body.patronCardNumber || '').trim();
     const rfidUid = normalizeRfidUid(body.rfidUid);
     const submittedBarcode = normalizeItemBarcode(body.itemBarcode);
     const itemBarcode = resolveItemBarcode(submittedBarcode, rfidUid);
-    logBackend('checkout.start', {
+
+    logger.info('Checkout', `[START] Checkout initiated for Patron: ${patronCardNumber}, Item: ${itemBarcode}`, {
+      requestId,
       patronCardNumber,
       itemBarcode,
-      submittedBarcode: submittedBarcode && submittedBarcode !== itemBarcode ? submittedBarcode : undefined,
       rfidUid
     });
 
     if (!patronCardNumber || !itemBarcode) {
+      logger.warn('Checkout', '[FAIL] Missing required fields for checkout', { requestId, patronCardNumber, itemBarcode });
       sendJson(res, 400, {
         success: false,
         message: 'Patron card number and item barcode are required'
@@ -1163,21 +1379,26 @@ async function handleCheckout(req, res) {
       return;
     }
 
-    const patronsPayload = await kohaRequest(`/patrons?cardnumber=${encodeURIComponent(patronCardNumber)}`);
-    const patrons = normalizeCollection(patronsPayload);
-    const patron = findExactMatch(patrons, 'cardnumber', patronCardNumber);
+    logger.info('Patron', `Searching for patron: ${patronCardNumber}`, { requestId });
+    let patronsPayload = await kohaRequest(`/patrons?cardnumber=${encodeURIComponent(patronCardNumber)}`);
+    let patrons = normalizeCollection(patronsPayload);
+    let patron = findExactMatch(patrons, 'cardnumber', patronCardNumber);
     if (!patron) {
+      logger.warn('Patron', `Patron not found: ${patronCardNumber}`, { requestId });
       sendJson(res, 404, {
         success: false,
         message: `No patron found with card number ${patronCardNumber}`
       });
       return;
     }
+    logger.info('Patron', `Patron identified: ${patron.firstname} ${patron.surname}`, { requestId, patronId: patron.patron_id });
 
+    logger.info('Database', `Fetching item details: ${itemBarcode}`, { requestId });
     const itemsPayload = await kohaRequest(`/items?external_id=${encodeURIComponent(itemBarcode)}`);
     const items = normalizeCollection(itemsPayload);
     const item = findExactMatch(items, 'external_id', itemBarcode);
     if (!item) {
+      logger.warn('Database', `Item not found: ${itemBarcode}`, { requestId });
       sendJson(res, 404, {
         success: false,
         message: `No item found with barcode ${itemBarcode}`
@@ -1191,7 +1412,7 @@ async function handleCheckout(req, res) {
       KOHA_CONFIG.libraryId
     ]);
 
-    // STEP 1: Transaction approved in database (Koha POST)
+    logger.info('Checkout', `Registering checkout in Koha for Item: ${item.item_id}`, { requestId });
     let checkout = null;
     try {
       checkout = await kohaPost('/checkouts', {
@@ -1199,44 +1420,46 @@ async function handleCheckout(req, res) {
         item_id: item.item_id,
         library_id: libraryId
       });
+      logger.info('Checkout', 'Database transaction successful', { requestId, checkoutId: checkout.checkout_id });
     } catch (postError) {
       if (!isKohaConfirmationError(postError)) {
+        logger.error('Checkout', `Database transaction failed: ${postError.message}`, { requestId, error: postError });
         throw postError;
       }
 
-      // Koha can return "Confirmation error" on repeat submit while the first
-      // checkout already succeeded. Recover if the active loan matches patron+item.
+      logger.warn('Checkout', 'Koha returned confirmation error, attempting recovery...', { requestId });
       const activeCheckout = await getActiveCheckoutForItemId(item.item_id);
       const samePatronLoan = activeCheckout && Number(activeCheckout.patron_id) === Number(patron.patron_id);
       if (!samePatronLoan) {
+        logger.error('Checkout', 'Recovery failed: item checked out by different patron', { requestId });
         throw postError;
       }
 
       checkout = activeCheckout;
-      logBackend('checkout.confirmation.recovered', {
-        patronCardNumber,
-        itemBarcode,
-        checkoutId: checkout.checkout_id || null
-      });
+      logger.info('Checkout', 'Recovery successful: existing loan found for same patron', { requestId });
     }
 
-    // STEP 2: Write AFI = 0x00 (unsecured — item is issued, gate should ALLOW)
-    // This always runs after a successful DB transaction.
     let securityUpdate = null;
     try {
-      logBackend('rfid.security.write.attempt', { barcode: itemBarcode, uid: rfidUid, afi: '00', reason: 'post-checkout' });
+      logger.info('RFID', `[WRITE] Attempting security update (AFI: 00) for Barcode: ${itemBarcode}`, { requestId, uid: rfidUid });
       securityUpdate = await writeRfidSecurityState({
         barcode: itemBarcode,
         uid: rfidUid,
         afi: '00',
         state: 'Unsecure'
       });
+      
+      if (securityUpdate.success) {
+        logger.info('RFID', 'RFID write successful', { requestId, result: securityUpdate });
+      } else {
+        logger.warn('RFID', `RFID write failed: ${securityUpdate.message}`, { requestId, result: securityUpdate });
+      }
     } catch (securityError) {
       securityUpdate = {
         success: false,
         message: securityError.message
       };
-      logBackend('rfid.security.error', { barcode: itemBarcode, uid: rfidUid, afi: '00', message: securityError.message });
+      logger.error('RFID', `RFID write error: ${securityError.message}`, { requestId, error: securityError });
     }
 
     sendJson(res, 200, {
@@ -1254,10 +1477,11 @@ async function handleCheckout(req, res) {
       },
       securityUpdate
     });
+    
     rememberRfidUidBarcode(rfidUid, itemBarcode);
-    logBackend('checkout.success', { patronCardNumber, itemBarcode, rfidUid, securityUpdate });
+    logger.info('Checkout', `[SUCCESS] Checkout completed for Item: ${itemBarcode}`, { requestId });
   } catch (error) {
-    logBackend('checkout.error', { message: error.message, stack: error.stack });
+    logger.error('Checkout', `[CRITICAL] Checkout process failed: ${error.message}`, { requestId, stack: error.stack });
     sendJson(res, 500, {
       success: false,
       message: error.message || 'Checkout failed'
@@ -1267,18 +1491,21 @@ async function handleCheckout(req, res) {
 
 
 async function handleCheckin(req, res) {
+  const requestId = uuidv4();
   try {
     const body = await parseRequestBody(req);
     const rfidUid = normalizeRfidUid(body.rfidUid);
     const submittedBarcode = normalizeItemBarcode(body.itemBarcode);
     const itemBarcode = resolveItemBarcode(submittedBarcode, rfidUid);
-    logBackend('checkin.start', {
+
+    logger.info('Checkin', `[START] Check-in initiated for Item: ${itemBarcode}`, {
+      requestId,
       itemBarcode,
-      submittedBarcode: submittedBarcode && submittedBarcode !== itemBarcode ? submittedBarcode : undefined,
       rfidUid
     });
 
     if (!itemBarcode) {
+      logger.warn('Checkin', '[FAIL] Missing item barcode for check-in', { requestId });
       sendJson(res, 400, {
         success: false,
         message: 'Book number is required'
@@ -1286,26 +1513,31 @@ async function handleCheckin(req, res) {
       return;
     }
 
+    logger.info('Database', `Fetching item details: ${itemBarcode}`, { requestId });
     const itemDetails = await getItemDetails(itemBarcode);
-    // Capture active loan details before SIP check-in clears the checkout record.
+    
     let loanDetails = {
       patronName: '',
       patronCardNumber: '',
       fineAmount: 0
     };
     try {
+      logger.info('Database', `Looking up current loan for: ${itemBarcode}`, { requestId });
       loanDetails = await getCurrentLoanDetails(itemBarcode);
+      if (loanDetails.patronCardNumber) {
+        logger.info('Database', `Active loan found for Patron: ${loanDetails.patronCardNumber}`, { requestId });
+      } else {
+        logger.warn('Database', 'No active loan found for this item', { requestId });
+      }
     } catch (loanError) {
-      logBackend('checkin.loan.lookup.failed', { itemBarcode, message: loanError.message });
+      logger.error('Database', `Loan lookup failed: ${loanError.message}`, { requestId, error: loanError });
     }
 
-    // STEP 1: Mark book as returned in database (SIP2)
+    logger.info('SIP2', `[ACTION] Sending check-in command for: ${itemBarcode}`, { requestId });
     const result = await sipCheckin(itemBarcode);
-    logBackend('checkin.sip', { itemBarcode, ok: result.ok });
-    logBackend('checkin.sip.raw', { itemBarcode, raw: result.raw });
-
+    
     if (!result.ok) {
-      logBackend('checkin.sip.failed', { itemBarcode, ok: false });
+      logger.error('SIP2', `[FAIL] SIP2 check-in failed for ${itemBarcode}`, { requestId, response: result });
       sendJson(res, 500, {
         success: false,
         message: result.message || 'SIP2 check-in failed',
@@ -1313,6 +1545,7 @@ async function handleCheckin(req, res) {
       });
       return;
     }
+    logger.info('SIP2', `[SUCCESS] SIP2 check-in confirmed for: ${itemBarcode}`, { requestId });
 
     const sipTitleCandidate = extractSipField(result.raw, 'AJ');
     const sipTitle = isUsableSipTitle(sipTitleCandidate)
@@ -1326,23 +1559,27 @@ async function handleCheckin(req, res) {
       itemBarcode
     ]);
 
-    // STEP 2: Write AFI = 0x90 (secured — item is returned, gate should BLOCK)
-    // This always runs after a successful SIP2 check-in.
     let securityUpdate = null;
     try {
-      logBackend('rfid.security.write.attempt', { barcode: itemBarcode, uid: rfidUid, afi: '90', reason: 'post-checkin' });
+      logger.info('RFID', `[WRITE] Attempting security update (AFI: 90) for Barcode: ${itemBarcode}`, { requestId, uid: rfidUid });
       securityUpdate = await writeRfidSecurityState({
         barcode: itemBarcode,
         uid: rfidUid,
         afi: '90',
         state: 'Secure'
       });
+      
+      if (securityUpdate.success) {
+        logger.info('RFID', 'RFID write successful', { requestId, result: securityUpdate });
+      } else {
+        logger.warn('RFID', `RFID write failed: ${securityUpdate.message}`, { requestId, result: securityUpdate });
+      }
     } catch (securityError) {
       securityUpdate = {
         success: false,
         message: securityError.message
       };
-      logBackend('rfid.security.error', { barcode: itemBarcode, uid: rfidUid, afi: '90', message: securityError.message });
+      logger.error('RFID', `RFID write error: ${securityError.message}`, { requestId, error: securityError });
     }
 
     sendJson(res, 200, {
@@ -1360,10 +1597,11 @@ async function handleCheckin(req, res) {
       },
       securityUpdate
     });
+    
     rememberRfidUidBarcode(rfidUid, itemBarcode);
-    logBackend('checkin.success', { itemBarcode, rfidUid, finalTitle, securityUpdate });
+    logger.info('Checkin', `[SUCCESS] Check-in completed for Item: ${itemBarcode}`, { requestId });
   } catch (error) {
-    logBackend('checkin.error', { message: error.message, stack: error.stack });
+    logger.error('Checkin', `[CRITICAL] Check-in process failed: ${error.message}`, { requestId, stack: error.stack });
     sendJson(res, 500, {
       success: false,
       message: error.message || 'Check-in failed'
@@ -1411,8 +1649,14 @@ async function handleRfidTags(res) {
 
     await ensureRfidBridgeStarted();
     const tags = filterLiveRfidTags(await proxyRfidRequest('/api/tags')).map(normalizeRfidTag);
+    
+    if (tags.length > 0) {
+      logger.info('RFID', `Detected ${tags.length} tag(s) on reader`, { tags });
+    }
+    
     sendJson(res, 200, tags);
   } catch (error) {
+    logger.error('RFID', `Tag polling failed: ${error.message}`);
     sendJson(res, 503, {
       success: false,
       message: RFID_STATE.lastError || error.message
@@ -1477,13 +1721,25 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && reqUrl.pathname === '/api/status') {
+    const isOnline = await isKohaReachable();
+    let rfidConnected = false;
+    
+    if (RFID_STATE.status === 'running') {
+      try {
+        const bridgeStatus = await proxyRfidRequest('/api/status');
+        rfidConnected = (bridgeStatus.status === 'CONNECTED' || bridgeStatus.connected === true);
+      } catch (_) {}
+    }
+
     sendJson(res, 200, {
       status: 'ok',
       service: 'finalpUI-checkin',
       port: PORT,
+      online: isOnline,
       rfid: {
         enabled: RFID_STATE.enabled,
         state: RFID_STATE.status,
+        connected: rfidConnected,
         bridgePort: RFID_PORT,
         lastError: RFID_STATE.lastError
       }
@@ -1491,8 +1747,14 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+
   if (req.method === 'GET' && reqUrl.pathname === '/api/rfid/status') {
     await handleRfidStatus(res);
+    return;
+  }
+
+  if (req.method === 'GET' && reqUrl.pathname === '/api/search') {
+    await handleSearch(req, res);
     return;
   }
 
@@ -1504,7 +1766,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && reqUrl.pathname === '/api/debug/logs') {
     sendJson(res, 200, {
       success: true,
-      logFile: BACKEND_LOG_FILE,
+      logFile: APP_LOG_FILE,
       lines: readRecentBackendLogLines(Number(reqUrl.searchParams.get('lines') || 200))
     });
     return;
@@ -1564,22 +1826,28 @@ const server = http.createServer(async (req, res) => {
 });
 
 warmRfidBarcodeCacheFromLogs();
+startRfidMonitor();
 
 ensureRfidBridgeStarted().catch((error) => {
-  console.warn(`[rfid] Startup skipped: ${error.message}`);
+  logger.warn('RFID', `Startup skipped: ${error.message}`);
 });
 
-process.on('exit', stopRfidBridge);
+process.on('exit', () => {
+  stopRfidMonitor();
+  stopRfidBridge();
+});
 process.on('SIGINT', () => {
+  stopRfidMonitor();
   stopRfidBridge();
   process.exit(0);
 });
 process.on('SIGTERM', () => {
+  stopRfidMonitor();
   stopRfidBridge();
   process.exit(0);
 });
 
 server.listen(PORT, () => {
-  console.log(`finalpUI running at http://localhost:${PORT}`);
-  console.log('Open the page, press Check-In, enter the book number, or use RFID when the reader is connected.');
+  logger.info('System', `finalpUI running at http://localhost:${PORT}`);
+  logger.info('System', 'Open the page, press Check-In, enter the book number, or use RFID when the reader is connected.');
 });

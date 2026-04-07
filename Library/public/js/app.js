@@ -29,11 +29,112 @@ class LibraryKiosk {
 
         // Update mode indicator
         this.updateModeIndicator();
+        this.isReconnecting = false;
+
+        // Handle Splash Screen (5 seconds minimum for fresh startup, shorter for refresh)
+        const splashStartTime = Date.now();
+        const splashSeen = sessionStorage.getItem('splash_seen');
+        const MIN_SPLASH_MS = splashSeen ? 1000 : 5000;
+        sessionStorage.setItem('splash_seen', 'true');
+        
+        // Await initial health check on startup/refresh to ensure we don't 
+        // show the home view if items are disconnected.
+        await this.startHealthCheck();
+
+        // Wait for required duration
+        const elapsed = Date.now() - splashStartTime;
+        if (elapsed < MIN_SPLASH_MS) {
+            await this.delay(MIN_SPLASH_MS - elapsed);
+        }
+
+        // Hide splash screen
+        const splash = document.getElementById('splash-screen');
+        if (splash) {
+            splash.style.opacity = '0';
+            setTimeout(() => {
+                splash.style.visibility = 'hidden';
+            }, 800);
+        }
 
         // Show home view
         this.showView('home');
 
         console.log(`Library Kiosk initialized in ${this.api.getMode().toUpperCase()} mode`);
+    }
+
+    async startHealthCheck() {
+        const check = async () => {
+            if (this.isReconnecting) return;
+            try {
+                const response = await fetch('/api/status');
+                if (!response.ok) throw new Error(`Backend unreachable (HTTP ${response.status})`);
+                
+                const status = await response.json();
+                
+                // Trigger offline if internet down OR bridge offline OR hardware disconnected
+                const isOnline = status.online !== false;
+                const rfidRunning = !status.rfid?.enabled || (status.rfid?.state === 'running' || status.rfid?.state === 'starting' || status.rfid?.state === 'compiling');
+                const rfidHardwareConnected = !status.rfid?.enabled || status.rfid?.connected === true;
+
+                // Update UI indicators
+                this.updateOfflineStatusUI('internet', isOnline);
+                this.updateOfflineStatusUI('rfid', rfidRunning && rfidHardwareConnected);
+
+                if (!isOnline || !rfidRunning || !rfidHardwareConnected) {
+                    console.warn('[Kiosk] System error detected:', { isOnline, rfidRunning, rfidHardwareConnected, state: status.rfid?.state });
+                    this.showOfflineScreen();
+                    
+                    if (!rfidHardwareConnected) {
+                        const rfidText = document.getElementById('status-text-rfid');
+                        if (rfidText) rfidText.textContent = 'CHECK HARDWARE';
+                    }
+                    return;
+                }
+
+                this.hideOfflineScreen();
+            } catch (error) {
+                console.warn('[Kiosk] Health check failed:', error.message);
+                this.updateOfflineStatusUI('internet', false);
+                this.updateOfflineStatusUI('rfid', false);
+                this.showOfflineScreen();
+            }
+        };
+
+        // Perform initial check
+        await check();
+
+        // Periodic check every 5 seconds
+        setInterval(check, 5000);
+    }
+
+    updateOfflineStatusUI(type, isOnline) {
+        const dot = document.getElementById(`status-dot-${type}`);
+        const text = document.getElementById(`status-text-${type}`);
+        
+        if (dot && text) {
+            dot.className = `status-dot ${isOnline ? 'online' : 'offline'}`;
+            text.className = `status-value ${isOnline ? 'online' : 'offline'}`;
+            text.textContent = isOnline ? 'CONNECTED' : 'DISCONNECTED';
+        }
+    }
+
+    showOfflineScreen() {
+        const overlay = document.getElementById('offline-screen');
+        if (overlay) overlay.style.display = 'flex';
+    }
+
+    hideOfflineScreen() {
+        const overlay = document.getElementById('offline-screen');
+        if (overlay) overlay.style.display = 'none';
+    }
+
+    async closeApplication() {
+        try {
+            await fetch('/api/quit');
+        } catch (_) {
+            // Probably already shutting down
+        }
+        window.close();
     }
 
     delay(ms) {
@@ -49,6 +150,42 @@ class LibraryKiosk {
         document.getElementById('btn-checkin')?.addEventListener('click', () => { click(); this.startCheckIn(); });
         document.getElementById('btn-renew')?.addEventListener('click', () => { click(); this.showComingSoon('Renew'); });
         document.getElementById('btn-account')?.addEventListener('click', () => { click(); this.startAccount(); });
+        document.getElementById('btn-search')?.addEventListener('click', () => { click(); this.startSearch(); });
+
+        // Offline screen buttons
+        document.getElementById('btn-reconnect')?.addEventListener('click', async () => { 
+            click(); 
+            const btn = document.getElementById('btn-reconnect');
+            if (btn) btn.textContent = 'Attempting Recovery...';
+            this.isReconnecting = true;
+            
+            try {
+                // Request a bridge restart on the backend
+                await fetch('/api/rfid/restart', { method: 'POST' });
+                await this.delay(3500); // Allow time for bridge to start and attempt hardware contact
+                
+                const response = await fetch('/api/status');
+                if (response.ok) {
+                    const status = await response.json();
+                    const isOnline = status.online !== false;
+                    const rfidHardwareConnected = !status.rfid?.enabled || status.rfid?.connected === true;
+                    
+                    if (isOnline && rfidHardwareConnected) {
+                        this.hideOfflineScreen();
+                        if (typeof KioskSounds !== 'undefined') KioskSounds.success();
+                    } else if (!rfidHardwareConnected) {
+                        this.showError('RFID Reader still not detected. Please check the USB connection.');
+                    }
+                }
+            } catch (error) {
+                console.error('[Kiosk] Recovery failed:', error.message);
+                this.showError('Unable to reach backend for recovery. Please contact IT.');
+            } finally {
+                if (btn) btn.textContent = 'Reconnect Now';
+                this.isReconnecting = false;
+            }
+        });
+        document.getElementById('btn-close-app')?.addEventListener('click', () => { click(); this.closeApplication(); });
 
         // Form submissions
         document.getElementById('checkout-form')?.addEventListener('submit', (e) => this.handleCheckOutSubmit(e));
@@ -172,6 +309,18 @@ class LibraryKiosk {
         void this.disarmRfidBridge(true);
     }
 
+    startSearch() {
+        this.currentOperation = 'search';
+        const iframe = document.getElementById('search-iframe');
+        if (iframe && !iframe.src) {
+            // Load the OPAC URL from config
+            iframe.src = CONFIG.opacUrl || 'http://164.52.208.94:800';
+        }
+        this.showView('search');
+        this.resetAutoLogout();
+        void this.disarmRfidBridge(true);
+    }
+
     handleDoneCheckIn() {
         // Update Thank You view with stats
         const countSpan = document.getElementById('session-count');
@@ -196,10 +345,10 @@ class LibraryKiosk {
         this.showView('thankyou');
         if (typeof KioskSounds !== 'undefined') KioskSounds.celebration();
 
-        // Auto-return to home after 4 seconds
+        // Auto-return to home after 2 seconds
         setTimeout(() => {
             this.showView('home');
-        }, 4000);
+        }, 2000);
     }
 
     async startScanning() {
