@@ -433,6 +433,8 @@ class PatronRfidService {
         const isRenew    = window.kioskApp.currentOperation === 'renew';
 
         if (!isCheckout && !isAccount && !isRenew) return;
+        const isAccount = window.kioskApp.currentOperation === 'account';
+        if (!isCheckout && !isAccount) return;
 
         const safeValue = String(tagValue || '').trim();
         if (!safeValue) return;
@@ -451,6 +453,19 @@ class PatronRfidService {
 
         const targetInputId = isCheckout ? 'patron-card' : 'account-card';
         const patronCardEl = document.getElementById(targetInputId);
+        // For "My Account" mode, bypass the hidden input entirely and trigger
+        // the account lookup directly via the HID handler in app.js.
+        if (isAccount) {
+            console.log('[Patron RFID] Triggering account lookup for:', safeValue);
+            this.setStatus(`Patron card captured from CH340${uid ? ` (${uid})` : ''}. Loading account…`, 'ok');
+            if (window.kioskApp._handleHidCardRead) {
+                window.kioskApp._handleHidCardRead(safeValue);
+            }
+            return;
+        }
+
+        // Checkout mode — fill the patron-card input field
+        const patronCardEl = document.getElementById('patron-card');
         if (!patronCardEl) return;
 
         if (patronCardEl.value.trim().length > 0) {
@@ -458,6 +473,7 @@ class PatronRfidService {
                 isCheckout
                     ? 'Patron card already filled. Waiting for item barcode from HF FEIG reader.'
                     : 'Patron card already filled. Press Search to view account.',
+                'Patron card already filled. Waiting for item barcode from HF FEIG reader.',
                 'ok'
             );
             return;
@@ -470,6 +486,7 @@ class PatronRfidService {
         if (isCheckout) {
             document.getElementById('item-barcode')?.focus();
         }
+        document.getElementById('item-barcode')?.focus();
 
         this.setStatus(`Patron card captured from CH340${uid ? ` (${uid})` : ''}.`, 'ok');
         console.log('[Patron RFID] Filled patron card:', safeValue);
@@ -543,6 +560,28 @@ class PatronRfidService {
                 el.style.color = '#0f4c6e';
             }
         }
+        if (!this.statusEl) return;
+
+        this.statusEl.style.display = 'block';
+        this.statusEl.textContent = message;
+
+        if (type === 'ok') {
+            this.statusEl.style.background = 'rgba(16,185,129,0.10)';
+            this.statusEl.style.borderColor = 'rgba(16,185,129,0.24)';
+            this.statusEl.style.color = '#0f6b42';
+            return;
+        }
+
+        if (type === 'error') {
+            this.statusEl.style.background = 'rgba(239,68,68,0.10)';
+            this.statusEl.style.borderColor = 'rgba(239,68,68,0.22)';
+            this.statusEl.style.color = '#9f1d1d';
+            return;
+        }
+
+        this.statusEl.style.background = 'rgba(14,165,233,0.08)';
+        this.statusEl.style.borderColor = 'rgba(14,165,233,0.18)';
+        this.statusEl.style.color = '#0f4c6e';
     }
 }
 

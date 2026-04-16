@@ -402,6 +402,24 @@
               autocomplete="off">
           </div>
 
+        <div id="btn-search" class="feature-button">
+          <span class="feature-icon">🔍</span>
+          <div class="feature-label">Search Catalog</div>
+          <div class="feature-desc">Explore library collections</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Search View -->
+    <div id="view-search" class="view">
+      <div class="form-container account-container">
+        <h1 class="form-title">🔍 Library Catalog Search</h1>
+        <form id="search-form">
+          <div class="form-group">
+            <label for="search-input" class="form-label">Search Books</label>
+            <input type="text" id="search-input" class="form-input" placeholder="Title, Author, or ISBN" required
+              autocomplete="off">
+          </div>
           <div class="form-actions">
             <button type="button" class="btn btn-secondary btn-cancel">Home</button>
             <button type="submit" class="btn btn-primary">Search</button>
@@ -410,6 +428,56 @@
 
         <div id="account-results" class="account-results" style="display: none;"></div>
       </div>
+        <div id="search-results" class="account-results" style="display: none;"></div>
+      </div>
+    </div>
+
+    <!-- My Account View -->
+    <div id="view-account" class="view">
+      <!-- Login Screen -->
+      <div id="account-login-screen" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 2rem;">
+        <div style="background: white; border-radius: 1rem; box-shadow: 0 20px 60px rgba(0,0,0,0.12); padding: 2.5rem 3rem; max-width: 480px; width: 100%; text-align: center;">
+          <h1 style="font-size: 1.8rem; font-weight: 800; color: #1e293b; margin: 0 0 0.25rem 0;">👤 My Account</h1>
+          <p style="font-size: 1.05rem; color: #64748b; margin: 0 0 2rem 0;">Scan your Library Card to login</p>
+
+          <!-- Card-Tap Illustration -->
+          <div style="margin: 0 auto 1.5rem auto; max-width: 320px;">
+            <img src="card-tap.svg" alt="Tap your card on the reader" style="width: 100%; height: auto;" />
+          </div>
+
+          <!-- Pulsing Status -->
+          <div id="account-reader-status" style="font-size: 1rem; color: #3b82f6; font-weight: 600; animation: pulse-text 2s ease-in-out infinite;">
+            Waiting for card… Place card on reader
+          </div>
+
+          <!-- Error (hidden by default) -->
+          <div id="account-reader-error" style="display: none; font-size: 1rem; color: #ef4444; font-weight: 700; margin-top: 0.75rem;">
+            ❌ Invalid Card
+          </div>
+
+          <!-- Hidden HID input (keyboard wedge) -->
+          <input type="text" id="account-hid-input" autocomplete="off" style="position: absolute; left: -9999px; opacity: 0;" />
+        </div>
+
+        <div style="margin-top: 1.5rem;">
+          <button type="button" class="btn btn-secondary btn-cancel" style="padding: 0.6rem 2rem; border-radius: 12px; font-size: 1rem;">← Home</button>
+        </div>
+      </div>
+
+      <!-- Dashboard (shown after login) -->
+      <div id="account-dashboard" style="display: none; padding: 2rem; max-width: 600px; margin: 0 auto;">
+        <div id="account-results" class="account-results" style="display: none;"></div>
+        <div style="margin-top: 1rem; text-align: left;">
+          <button type="button" class="btn btn-secondary btn-cancel" style="padding: 0.6rem 2rem; border-radius: 12px;">← Home</button>
+        </div>
+      </div>
+
+      <style>
+        @keyframes pulse-text {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+      </style>
     </div>
 
     <!-- Check-Out View -->
@@ -532,6 +600,8 @@
             <button type="button" id="btn-done-checkin" class="btn btn-secondary" style="flex: none;">✓ Done</button>
           </div>
         </div>
+
+
       </div>
     </div>
 
@@ -539,6 +609,8 @@
     <div id="view-thankyou" class="view">
       <div class="thankyou-container">
         <div class="book-3d-scene">
+        <!-- Checkout Animation -->
+        <div id="thankyou-anim-checkout" class="book-3d-scene">
           <div class="book-3d">
             <div class="book-cover">
               <div class="book-spine"></div>
@@ -550,6 +622,18 @@
         <h1 class="thankyou-title">Success!</h1>
         <p class="thankyou-message">
           You checked in <span id="session-count" class="count-badge">0</span> items.
+
+        <!-- Checkin Animation / Instruction -->
+        <div id="thankyou-anim-checkin"
+          style="display: none; margin-bottom: 2rem; display: flex; flex-direction: column; align-items: center;">
+          <img src="shelf.svg" alt="Put book on shelf"
+            style="max-width: 100%; height: auto; max-height: 250px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);" />
+        </div>
+
+        <h1 class="thankyou-title">Success!</h1>
+        <p class="thankyou-message">
+          You <span id="thankyou-action-text">checked in</span> <span id="session-count" class="count-badge">0</span>
+          items.
         </p>
         <div class="quote-container">
           <p id="thankyou-quote" class="quote-text">“Reading is dreaming with open eyes.”</p>
@@ -748,6 +832,40 @@
       <div class="form-actions" style="justify-content: center; margin-top: 2rem;">
         <button type="button" class="btn btn-primary btn-new">New Check-In</button>
         <button type="button" class="btn btn-secondary btn-cancel">Home</button>
+  <!-- Check-In Success View -->
+  <div id="view-checkin-success" class="view">
+    <div class="success-container"
+      style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; text-align: center; gap: 1.5rem; padding: 2rem;">
+      <h1 style="color: #10b981; font-size: 3rem; font-weight: 800; margin-bottom: 0.5rem; letter-spacing: -0.02em;">✅
+        Book Checked In Successfully!</h1>
+      <p style="font-size: 1.4rem; color: #475569; margin-bottom: 1rem; max-width: 600px;">📚 Please arrange the book or
+        put the book on the shelf.</p>
+
+      <div
+        style="background: white; border-radius: 24px; padding: 2rem; box-shadow: 0 15px 35px rgba(0,0,0,0.05); margin-bottom: 1rem; width: 100%; max-width: 500px; display: flex; justify-content: center; align-items: center;">
+        <img src="shelf.svg" alt="Library Shelf" style="height: 250px; width: 100%; object-fit: contain;" />
+      </div>
+
+      <p style="font-size: 1.1rem; color: #64748b; font-style: italic; margin-bottom: 2rem;">Thank you for helping keep
+        the library organized.</p>
+
+      <button type="button" id="btn-final-done" class="btn btn-primary"
+        style="background: #10b981; border: none; padding: 1.2rem 4rem; border-radius: 50px; font-size: 1.2rem; font-weight: 700; box-shadow: 0 10px 20px rgba(16,185,129,0.3); transition: transform 0.2s;">Done</button>
+    </div>
+  </div>
+
+  <!-- Hold Modal -->
+  <div id="hold-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 2rem; border-radius: 16px; max-width: 420px; width: 90%; box-shadow: 0 20px 40px rgba(0,0,0,0.2); margin: auto; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+      <h3 style="margin-top: 0; font-size: 1.3rem; color: #1e293b;">📌 Place Hold / Reserve</h3>
+      <p id="hold-book-title" style="font-weight: 600; color: #334155; margin-bottom: 1rem;"></p>
+      <div style="margin-bottom: 1rem;">
+        <label style="font-size: 0.9rem; color: #475569; font-weight: 500;">Patron Card Number</label>
+        <input type="text" id="hold-patron-input" autocomplete="off" placeholder="Enter your card number" style="width: 100%; padding: 0.75rem 1rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 1rem; margin-top: 0.5rem; box-sizing: border-box;" />
+      </div>
+      <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+        <button type="button" id="btn-cancel-hold" class="btn btn-secondary" style="padding: 0.6rem 1.5rem; border-radius: 8px;">Cancel</button>
+        <button type="button" id="btn-confirm-hold" class="btn btn-primary" style="padding: 0.6rem 1.5rem; border-radius: 8px; background: #3b82f6; border: none; font-weight: 600;">Place Hold</button>
       </div>
     </div>
   </div>

@@ -47,6 +47,10 @@ class LibraryKiosk {
         // show the home view if items are disconnected.
         // await this.startHealthCheck();
 
+
+
+        //await this.startHealthCheck();
+
         // Wait for required duration
         const elapsed = Date.now() - splashStartTime;
         if (elapsed < MIN_SPLASH_MS) {
@@ -158,6 +162,9 @@ class LibraryKiosk {
         document.getElementById('btn-renew')?.addEventListener('click', () => { click(); this.startRenew(); });
         document.getElementById('btn-account')?.addEventListener('click', () => { click(); this.startAccount(); });
 
+        document.getElementById('btn-renew')?.addEventListener('click', () => { click(); this.showComingSoon('Renew'); });
+        document.getElementById('btn-account')?.addEventListener('click', () => { click(); this.startAccount(); });
+        document.getElementById('btn-search')?.addEventListener('click', () => { click(); this.startSearch(); });
 
         // Offline screen buttons
         document.getElementById('btn-reconnect')?.addEventListener('click', async () => {
@@ -200,6 +207,20 @@ class LibraryKiosk {
         document.getElementById('checkin-form')?.addEventListener('submit', (e) => this.handleCheckInSubmit(e));
         document.getElementById('account-form')?.addEventListener('submit', (e) => this.handleAccountSubmit(e));
 
+        document.getElementById('search-form')?.addEventListener('submit', (e) => this.handleSearchSubmit(e));
+
+        // HID Card Reader for My Account (keyboard wedge)
+        this._setupHidCardReader();
+
+        // Hold Modal
+        document.getElementById('btn-cancel-hold')?.addEventListener('click', () => {
+            click();
+            document.getElementById('hold-modal').style.display = 'none';
+        });
+        document.getElementById('btn-confirm-hold')?.addEventListener('click', () => {
+            click();
+            this.confirmPlaceHold();
+        });
 
         // Cancel / Home buttons
         document.querySelectorAll('.btn-cancel').forEach(btn => {
@@ -760,6 +781,12 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
 
 
 
+        document.getElementById('btn-final-done')?.addEventListener('click', () => {
+            click();
+            this.showView('home');
+        });
+    }
+
     startCheckOut() {
         this.currentOperation = 'checkout';
         this.scanningEnabled = true;
@@ -816,6 +843,7 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         const stepPlace = document.getElementById('checkin-step-place');
         const stepScan = document.getElementById('checkin-step-scanning');
         const scanActions = document.getElementById('checkin-scan-actions');
+
         if (stepPlace) stepPlace.style.display = 'flex';
         if (stepScan) stepScan.style.display = 'none';
         if (scanActions) scanActions.style.display = 'none';
@@ -837,6 +865,34 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
 
         document.getElementById('account-form')?.reset();
         const resultsContainer = document.getElementById('account-results');
+        // Reset UI to login screen
+        const loginScreen = document.getElementById('account-login-screen');
+        const dashboard = document.getElementById('account-dashboard');
+        const resultsContainer = document.getElementById('account-results');
+        const statusEl = document.getElementById('account-reader-status');
+        const errorEl = document.getElementById('account-reader-error');
+        const hidInput = document.getElementById('account-hid-input');
+
+        if (loginScreen) loginScreen.style.display = 'flex';
+        if (dashboard) dashboard.style.display = 'none';
+        if (resultsContainer) { resultsContainer.innerHTML = ''; resultsContainer.style.display = 'none'; }
+        if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Waiting for card\u2026 Place card on reader'; }
+        if (errorEl) errorEl.style.display = 'none';
+        if (hidInput) { hidInput.value = ''; }
+
+        this.showView('account');
+        this.resetAutoLogout();
+        if (window.patronRfidService?.beginAccountSession) window.patronRfidService.beginAccountSession();
+        void this.disarmRfidBridge(true);
+
+        // Auto-focus HID input
+        this._focusHidInput();
+    }
+
+    startSearch() {
+        this.currentOperation = 'search';
+        document.getElementById('search-form')?.reset();
+        const resultsContainer = document.getElementById('search-results');
         if (resultsContainer) {
             resultsContainer.innerHTML = '';
             resultsContainer.style.display = 'none';
@@ -849,6 +905,90 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         void this.disarmRfidBridge(true);
     }
 
+        this.showView('search');
+        this.resetAutoLogout();
+        void this.disarmRfidBridge(true);
+        document.getElementById('search-input')?.focus();
+    }
+
+    async handleSearchSubmit(e) {
+        e.preventDefault();
+        const query = document.getElementById('search-input')?.value.trim() || '';
+        if (!query) {
+            this.showError('Please enter a search query.');
+            return;
+        }
+
+        this.showLoading('search', true);
+        try {
+            const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+            const payload = await response.json();
+            if (!response.ok || !payload.success) {
+                throw new Error(payload.message || 'Search failed');
+            }
+            this.displaySearchResults(payload.data || [], query);
+        } catch (error) {
+            this.showError(error.message || 'Unable to fetch search results');
+        } finally {
+            this.showLoading('search', false);
+        }
+    }
+
+    displaySearchResults(results, query) {
+        const container = document.getElementById('search-results');
+        if (!container) return;
+
+        if (!results || results.length === 0) {
+            container.innerHTML = `
+                <div class="account-empty">
+                    No results found for "${query}".
+                </div>
+            `;
+            container.style.display = 'block';
+            return;
+        }
+
+        let html = `
+            <div class="account-summary">
+                <div class="account-summary-header">
+                    <h2>Search Results</h2>
+                    <div class="account-card-number">Found ${results.length} matches</div>
+                </div>
+                <div class="account-loans-grid">
+        `;
+
+        results.forEach(book => {
+            const statusColor = book.status === 'available' ? '#10b981' : '#f59e0b';
+            const statusText = book.status === 'available' ? 'Available' : 'Checked Out';
+            const holdBtn = book.status !== 'available'
+                ? `<button class="btn btn-primary btn-place-hold" data-barcode="${book.barcode}" data-title="${(book.title || '').replace(/"/g, '&quot;')}" style="margin-top: 0.75rem; padding: 0.4rem 1rem; border-radius: 8px; font-size: 0.85rem; background: #3b82f6; border: none; color: white; font-weight: 600; cursor: pointer;">📌 Place Hold</button>`
+                : '';
+            html += `
+                <div class="account-loan-card">
+                    <div class="account-loan-title">${book.title || 'Unknown Title'}</div>
+                    <div class="account-loan-meta">By ${book.author || 'Unknown Author'}</div>
+                    <div class="account-loan-meta">Barcode/ISBN: ${book.barcode || 'N/A'}</div>
+                    <div class="account-loan-meta" style="color: ${statusColor}; font-weight: 600; margin-top: 0.5rem;">● ${statusText}</div>
+                    ${holdBtn}
+                </div>
+            `;
+        });
+
+        html += `
+                </div>
+            </div>
+        `;
+
+        container.innerHTML = html;
+        container.style.display = 'block';
+
+        // Bind hold buttons
+        container.querySelectorAll('.btn-place-hold').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.openHoldModal(btn.dataset.barcode, btn.dataset.title);
+            });
+        });
+    }
 
     handleDoneCheckIn() {
         if (!this.checkinSessionCount || this.checkinSessionCount === 0) {
@@ -894,6 +1034,7 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
             this.showThankYouSummary(count);
         } else {
             this.showThankYouSummary(this.checkinSessionCount);
+            this.showCheckinSummary();
         }
     }
 
@@ -910,6 +1051,17 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
                     ${book.patronNo ? `<div><strong>Patron No:</strong> ${book.patronNo}</div>` : ''}
                     ${book.dueDate ? `<div><strong>Due:</strong> ${book.dueDate}</div>` : ''}
                     ${book.returnDate ? `<div><strong>Returned:</strong> ${book.returnDate}</div>` : ''}
+        let itemNo = 0;
+
+        data.books.forEach(book => {
+            itemNo++;
+            booksHtml += `
+                <div style="margin-bottom: 5px; border-bottom: 1px dashed #000; padding-bottom: 3px; font-size: 10px; color: #000;">
+                    <div><b>${itemNo}. ${book.title || 'Unknown'}</b></div>
+                    <div>Barcode: ${book.barcode}</div>
+                    ${book.patronNo ? `<div>Patron: ${book.patronNo}</div>` : ''}
+                    ${type === 'checkout' ? (book.dueDate ? `<div>Due: ${book.dueDate}</div>` : '') : ''}
+                    ${type === 'checkin' ? (book.returnDate ? `<div>Returned: ${book.returnDate}</div>` : '') : ''}
                 </div>
             `;
         });
@@ -927,6 +1079,29 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
                     ${booksHtml}
                 </div>
                 <div style="margin-top: 15px; font-size: 11px; font-style: italic; text-align: center;">Thank you for visiting!</div>
+        const patronLine = data.patronCard
+            ? `<div style="text-align: left; font-size: 10px; margin-bottom: 6px; color: #000;"><b>Patron:</b> ${data.patronName || data.patronCard}<br><b>Card:</b> ${data.patronCard}</div>`
+            : `<div style="text-align: left; font-size: 10px; margin-bottom: 6px; color: #000;"><b>Patron:</b> N/A</div>`;
+
+        const actionTitle = type === 'checkout' ? 'CHECKED OUT' : 'CHECKED IN';
+
+        const receiptContent = `
+            <div id="thermal-print-container" style="width: 100%; max-width: 100%; font-family: 'Courier New', Courier, monospace; text-align: center; color: #000; padding: 0; margin: 0; overflow: hidden; word-wrap: break-word;">
+                <h2 style="font-size: 12px; margin: 2px 0; font-weight: bold; color: #000;">${collegeName}</h2>
+                <h2 style="font-size: 11px; margin: 2px 0; font-weight: bold; color: #000;">Smart Library Kiosk</h2>
+                <div style="font-size: 9px; margin-bottom: 6px; color: #000;">========================</div>
+                <div style="font-size: 9px; margin-bottom: 6px; color: #000;">${dateStr}</div>
+                ${patronLine}
+                <div style="text-align: left; font-weight: bold; margin-bottom: 3px; border-bottom: 1px dashed #000; padding-bottom: 2px; font-size: 10px; color: #000;">
+                    ${actionTitle} (${data.books.length})
+                </div>
+                <div style="text-align: left; margin-top: 3px; color: #000;">
+                    ${booksHtml}
+                </div>
+                <div style="margin-top: 8px; font-size: 9px; color: #000;">========================</div>
+                <div style="margin-top: 3px; font-size: 9px; font-style: italic; text-align: center; color: #000;">Thank you for visiting!</div>
+                <div style="margin-top: 2px; font-size: 8px; text-align: center; color: #000;">Powered by SoCTeamup</div>
+                <div style="margin-top: 6px;">&nbsp;</div>
             </div>
         `;
 
@@ -949,6 +1124,12 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
                     body > * { display: none !important; }
                     body > #temp-print-container { display: block !important; }
                     @page { margin: 0; }
+                    #temp-print-container {
+                        width: 48mm;
+                        margin: 0;
+                        padding: 0;
+                    }
+                    @page { margin: 0; size: 48mm auto; }
                 }
             `;
             document.head.appendChild(style);
@@ -967,6 +1148,25 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         const countSpan = document.getElementById('session-count');
         if (countSpan) countSpan.textContent = count;
 
+    showThankYouSummary(count, type) {
+        const typeArg = type || this.printType || 'checkin';
+        const countSpan = document.getElementById('session-count');
+        if (countSpan) countSpan.textContent = count;
+
+        const actionText = document.getElementById('thankyou-action-text');
+        if (actionText) actionText.textContent = typeArg === 'checkout' ? 'checked out' : 'checked in';
+        
+        const animCheckout = document.getElementById('thankyou-anim-checkout');
+        const animCheckin = document.getElementById('thankyou-anim-checkin');
+        
+        if (typeArg === 'checkout') {
+            if (animCheckout) animCheckout.style.display = 'block'; // Or flex depending on css
+            if (animCheckin) animCheckin.style.display = 'none';
+        } else {
+            if (animCheckout) animCheckout.style.display = 'none';
+            if (animCheckin) animCheckin.style.display = 'flex';
+        }
+
         const quotes = [
             '"So many books, so little time." – Frank Zappa',
             '"A room without books is like a body without a soul." – Cicero',
@@ -984,6 +1184,11 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         setTimeout(() => {
             this.showView('home');
         }, 3500);
+    }
+
+    showCheckinSummary() {
+        this.showView('checkin-success');
+        if (typeof KioskSounds !== 'undefined') KioskSounds.celebration();
     }
 
     async startScanning() {
@@ -1398,6 +1603,7 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
                 ? `<div style="font-size: 0.9rem; color: #b45309; font-weight: 600;">Security write failed: ${securityUpdate.message || 'tag state not updated'}</div>`
                 : '';
 
+
             if (!this.checkinSessionBooks) this.checkinSessionBooks = [];
             this.checkinSessionBooks.push({
                 title: displayName,
@@ -1589,12 +1795,24 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         const container = document.getElementById('account-results');
         if (!container) return;
 
+        // Hide login screen, show dashboard
+        const loginScreen = document.getElementById('account-login-screen');
+        const dashboard = document.getElementById('account-dashboard');
+        if (loginScreen) loginScreen.style.display = 'none';
+        if (dashboard) dashboard.style.display = 'block';
+
         const patronName = String(data?.patronName || '').trim();
         const patronCardNumber = String(data?.patronCardNumber || '').trim();
         const fineAmount = Number(data?.fineAmount || 0) || 0;
         const loans = Array.isArray(data?.loans) ? data.loans : [];
 
         const fineClass = fineAmount > 0 ? 'account-fine has-fine' : 'account-fine';
+        const holds = Array.isArray(data?.holds) ? data.holds : [];
+
+        const fineColor = fineAmount > 0 ? '#ef4444' : '#10b981';
+        const fineLabel = fineAmount > 0 ? `₹${fineAmount.toFixed(2)}` : '₹0.00 — No Fines';
+
+        // Issued Books HTML
         const loansHtml = loans.length > 0
             ? loans.map((loan) => {
                 const title = String(loan?.itemTitle || loan?.itemBarcode || 'Unknown title').trim();
@@ -1621,6 +1839,73 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
                 </div>
                 <div class="account-section-title">Issued Books (${loans.length})</div>
                 <div class="account-loans-grid">${loansHtml}</div>
+                const dueDateRaw = loan?.dueDate;
+                const dueDate = dueDateRaw ? this.parseCalendarDate(dueDateRaw) : null;
+                const dueDateStr = dueDate && !isNaN(dueDate) ? this.formatDate(dueDate) : 'Not available';
+                const isOverdue = dueDate && !isNaN(dueDate) && dueDate < new Date();
+                const statusColor = isOverdue ? '#ef4444' : '#10b981';
+                const statusText = isOverdue ? '⚠ Overdue' : '✓ Normal';
+                return `
+                    <div style="background: white; border-radius: 12px; padding: 1rem 1.25rem; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-left: 4px solid ${statusColor};">
+                        <div style="font-weight: 700; font-size: 1rem; color: #1e293b; margin-bottom: 0.3rem;">${title}</div>
+                        <div style="font-size: 0.85rem; color: #64748b;">Barcode: ${barcode || 'N/A'}</div>
+                        <div style="font-size: 0.85rem; color: #64748b;">Due: ${dueDateStr}</div>
+                        <div style="font-size: 0.85rem; font-weight: 600; color: ${statusColor}; margin-top: 0.3rem;">${statusText}</div>
+                    </div>
+                `;
+            }).join('')
+            : '<div style="text-align: center; color: #94a3b8; padding: 1.5rem;">No books are currently checked out.</div>';
+
+        // Holds HTML
+        const holdsHtml = holds.length > 0
+            ? holds.map((hold) => {
+                const statusColors = {
+                    'Ready for Pickup': '#10b981',
+                    'In Transit': '#3b82f6',
+                    'On Hold': '#f59e0b'
+                };
+                const color = statusColors[hold.status] || '#64748b';
+                return `
+                    <div style="background: white; border-radius: 12px; padding: 1rem 1.25rem; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-left: 4px solid ${color};">
+                        <div style="font-weight: 700; font-size: 1rem; color: #1e293b; margin-bottom: 0.3rem;">${hold.title}</div>
+                        <div style="font-size: 0.85rem; color: #64748b;">Position in Queue: ${hold.queuePosition}</div>
+                        <div style="font-size: 0.85rem; color: #64748b;">Expires: ${hold.pickupDeadline}</div>
+                        <div style="font-size: 0.85rem; font-weight: 600; color: ${color}; margin-top: 0.3rem;">● ${hold.status}</div>
+                    </div>
+                `;
+            }).join('')
+            : '<div style="text-align: center; color: #94a3b8; padding: 1.5rem;">You have no active holds.</div>';
+
+        container.innerHTML = `
+            <!-- User Info Card -->
+            <div style="background: linear-gradient(135deg, #3b82f6, #2563eb); border-radius: 16px; padding: 1.5rem 2rem; color: white; margin-bottom: 1.5rem; box-shadow: 0 8px 20px rgba(37,99,235,0.3);">
+                <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.75rem;">
+                    <div style="width: 52px; height: 52px; background: rgba(255,255,255,0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">👤</div>
+                    <div>
+                        <div style="font-size: 1.4rem; font-weight: 700;">${patronName || patronCardNumber}</div>
+                        <div style="font-size: 0.9rem; opacity: 0.85;">Card: ${patronCardNumber}</div>
+                    </div>
+                </div>
+                <div style="background: rgba(255,255,255,0.15); border-radius: 8px; padding: 0.6rem 1rem; display: inline-block;">
+                    <span style="font-size: 0.85rem; opacity: 0.9;">Fine: </span>
+                    <span style="font-weight: 700; color: ${fineAmount > 0 ? '#fca5a5' : '#86efac'};">${fineLabel}</span>
+                </div>
+            </div>
+
+            <!-- Issued Books Section -->
+            <div style="margin-bottom: 1.5rem;">
+                <h3 style="font-size: 1.1rem; color: #1e293b; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">📚 Issued Books <span style="background: #e0f2fe; color: #0369a1; font-size: 0.8rem; padding: 0.15rem 0.6rem; border-radius: 10px; font-weight: 600;">${loans.length}</span></h3>
+                <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                    ${loansHtml}
+                </div>
+            </div>
+
+            <!-- My Holds Section -->
+            <div style="margin-bottom: 1rem;">
+                <h3 style="font-size: 1.1rem; color: #1e293b; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">📌 My Holds <span style="background: #fef3c7; color: #92400e; font-size: 0.8rem; padding: 0.15rem 0.6rem; border-radius: 10px; font-weight: 600;">${holds.length}</span></h3>
+                <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                    ${holdsHtml}
+                </div>
             </div>
         `;
 
@@ -1758,6 +2043,131 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
             });
         } catch (e) {
             console.warn('Failed to trigger hardware LED:', e);
+        }
+    }
+
+    // === HID Card Reader (Keyboard Wedge) for My Account ===
+    // Listens at document level so it works even without input focus.
+    // USB HID readers send keystrokes very fast (< 50ms apart) then Enter.
+    _setupHidCardReader() {
+        this._hidBuffer = '';
+        this._hidLastKeyTime = 0;
+        this._hidProcessing = false;
+
+        document.addEventListener('keydown', (e) => {
+            // Only capture when on the account login screen
+            if (this.currentView !== 'account') return;
+            const loginScreen = document.getElementById('account-login-screen');
+            if (!loginScreen || loginScreen.style.display === 'none') return;
+            if (this._hidProcessing) return;
+
+            const now = Date.now();
+
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const cardId = this._hidBuffer.trim();
+                this._hidBuffer = '';
+                if (cardId.length >= 2) {
+                    this._handleHidCardRead(cardId);
+                }
+                return;
+            }
+
+            // Reset buffer if gap > 500ms (user is not using the reader)
+            if (now - this._hidLastKeyTime > 500) {
+                this._hidBuffer = '';
+            }
+
+            // Accept only printable single characters
+            if (e.key.length === 1) {
+                this._hidBuffer += e.key;
+                this._hidLastKeyTime = now;
+            }
+        });
+    }
+
+    _focusHidInput() {
+        // No longer needed — document-level listener handles everything
+    }
+
+    async _handleHidCardRead(cardId) {
+        if (this._hidProcessing) return;
+        this._hidProcessing = true;
+
+        const statusEl = document.getElementById('account-reader-status');
+        const errorEl = document.getElementById('account-reader-error');
+
+        console.log('[HID] Card scanned:', cardId);
+
+        // Show loading state
+        if (statusEl) { statusEl.textContent = 'Reading card\u2026'; statusEl.style.animation = 'none'; }
+        if (errorEl) errorEl.style.display = 'none';
+
+        try {
+            const result = await this.api.getAccount(cardId);
+            if (typeof KioskSounds !== 'undefined') KioskSounds.success();
+            this.displayAccountSummary(result.data || {});
+        } catch (error) {
+            console.warn('[HID] Card login failed:', error.message);
+            if (typeof KioskSounds !== 'undefined') KioskSounds.error();
+
+            // Show error for 2 seconds
+            if (statusEl) statusEl.style.display = 'none';
+            if (errorEl) { errorEl.textContent = '\u274c Invalid Card'; errorEl.style.display = 'block'; }
+
+            setTimeout(() => {
+                if (errorEl) errorEl.style.display = 'none';
+                if (statusEl) {
+                    statusEl.textContent = 'Waiting for card\u2026 Place card on reader';
+                    statusEl.style.display = 'block';
+                    statusEl.style.animation = 'pulse-text 2s ease-in-out infinite';
+                }
+            }, 2000);
+        } finally {
+            this._hidProcessing = false;
+        }
+    }
+
+    // === Hold Modal ===
+    openHoldModal(barcode, title) {
+        const modal = document.getElementById('hold-modal');
+        const titleEl = document.getElementById('hold-book-title');
+        const patronInput = document.getElementById('hold-patron-input');
+        if (titleEl) titleEl.textContent = title || barcode;
+        if (patronInput) patronInput.value = '';
+        if (modal) modal.style.display = 'block';
+        this._holdBarcode = barcode;
+        if (patronInput) patronInput.focus();
+    }
+
+    async confirmPlaceHold() {
+        const barcode = this._holdBarcode;
+        const patronInput = document.getElementById('hold-patron-input');
+        const patronCard = patronInput?.value?.trim();
+
+        if (!patronCard) {
+            this.showError('Please enter your patron card number.');
+            return;
+        }
+
+        const confirmBtn = document.getElementById('btn-confirm-hold');
+        if (confirmBtn) {
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Placing...';
+        }
+
+        try {
+            const result = await this.api.placeHold(patronCard, barcode);
+            document.getElementById('hold-modal').style.display = 'none';
+            this.showError(result.message || 'Hold placed successfully!');
+            if (typeof KioskSounds !== 'undefined') KioskSounds.success();
+        } catch (error) {
+            this.showError(error.message || 'Failed to place hold.');
+        } finally {
+            if (confirmBtn) {
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = 'Place Hold';
+            }
         }
     }
 }

@@ -122,6 +122,9 @@ class RFIDService {
             const scanningEnabled = (typeof window.kioskApp !== 'undefined' && window.kioskApp.scanningEnabled) || false;
 
             if (!scanningEnabled && !isCheckout && !isRenew) {
+            const scanningEnabled = (typeof window.kioskApp !== 'undefined' && window.kioskApp.scanningEnabled) || false;
+
+            if (!scanningEnabled && !isCheckout) {
                 return;
             }
 
