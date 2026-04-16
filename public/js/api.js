@@ -433,6 +433,31 @@ class KohaAPI {
         }
     }
 
+    async placeHold(patronCardNumber, barcode) {
+        if (this.mode === 'demo') {
+            await this._simulateDelay();
+            return { success: true, message: 'Hold placed successfully (Demo Mode)' };
+        }
+        
+        try {
+            const response = await fetch(`${this.config.backend.baseUrl}/hold`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ patronCardNumber, barcode })
+            });
+
+            const result = await response.json();
+
+            if (!result.success) {
+                throw new Error(result.message || 'Failed to place hold');
+            }
+
+            return result;
+        } catch (error) {
+            throw new Error(`Backend Error: ${error.message}`);
+        }
+    }
+
     /**
      * Get current mode
      */

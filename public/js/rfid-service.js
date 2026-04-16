@@ -159,25 +159,31 @@ class RFIDService {
 
                 // Only mark as processed when we ACTUALLY process it
                 if (isCheckout) {
-                    const patronCardEl = document.getElementById('patron-card');
-                    const itemBarcodeEl = document.getElementById('item-barcode');
-                    const patronReady = patronCardEl && patronCardEl.value.trim().length > 0;
-                    const itemFieldEmpty = itemBarcodeEl && !itemBarcodeEl.value;
-
-                    if (patronReady && itemFieldEmpty && !this.checkoutProcessing) {
+                    if (scanningEnabled) {
                         this.processedAppearances.add(dedupeKey);
-                        this.checkoutProcessing = true;
-
-                        console.log(`[RFID] Processing checkout tag: ${barcode} (UID: ${uid})`);
-                        window.kioskApp.processCheckoutTag({ barcode, uid })
-                            .catch((error) => {
-                                console.warn('[RFID] Checkout tag processing failed:', error?.message || error);
-                            })
-                            .finally(() => {
-                                this.checkoutProcessing = false;
-                            });
+                        console.log(`[RFID] Queuing checkout tag: ${barcode} (UID: ${uid})`);
+                        this.checkinQueue.push({ barcode, uid, isCheckout: true });
+                        this._drainCheckinQueue();
                     } else {
-                        // We are in checkout, but patron card not ready. Do not consume tag yet.
+                        // Fallback manual mode
+                        const patronCardEl = document.getElementById('patron-card');
+                        const itemBarcodeEl = document.getElementById('item-barcode-checkout');
+                        const patronReady = patronCardEl && patronCardEl.value.trim().length > 0;
+                        const itemFieldEmpty = itemBarcodeEl && !itemBarcodeEl.value;
+
+                        if (patronReady && itemFieldEmpty && !this.checkoutProcessing) {
+                            this.processedAppearances.add(dedupeKey);
+                            this.checkoutProcessing = true;
+
+                            console.log(`[RFID] Processing checkout tag: ${barcode} (UID: ${uid})`);
+                            window.kioskApp.processCheckoutTag({ barcode, uid })
+                                .catch((error) => {
+                                    console.warn('[RFID] Checkout tag processing failed:', error?.message || error);
+                                })
+                                .finally(() => {
+                                    this.checkoutProcessing = false;
+                                });
+                        }
                     }
                     continue;
                 }
@@ -208,10 +214,14 @@ class RFIDService {
             while (this.checkinQueue.length > 0) {
                 const nextTag = this.checkinQueue.shift();
                 console.log(`[RFID] Processing: ${nextTag.barcode} (UID: ${nextTag.uid})`);
-                await window.kioskApp.processBarcode(nextTag);
+                if (nextTag.isCheckout) {
+                    await window.kioskApp.processCheckoutTag(nextTag);
+                } else {
+                    await window.kioskApp.processBarcode(nextTag);
+                }
             }
         } catch (error) {
-            console.warn('[RFID] Check-in queue processing failed:', error?.message || error);
+            console.warn('[RFID] Queue processing failed:', error?.message || error);
         } finally {
             this.checkinProcessing = false;
         }

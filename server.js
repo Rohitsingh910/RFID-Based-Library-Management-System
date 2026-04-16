@@ -611,6 +611,12 @@ function startRfidMonitor() {
       const bridgeStatus = await proxyRfidRequest('/api/status');
       let isHardwareConnected = (bridgeStatus.status === 'CONNECTED' || bridgeStatus.connected === true);
 
+      // If the bridge reports a fatal USB error but still claims to be CONNECTED, it's a zombie state.
+      if (bridgeStatus.lastError && /Device not open|failed|Disconnected/i.test(bridgeStatus.lastError)) {
+        logger.warn('RFID', `Hardware connection lost detected via lastError: ${bridgeStatus.lastError}`);
+        isHardwareConnected = false;
+      }
+
       // Eagerly probe the reader hardware to detect "Zombie" connection states
       // where the USB was physically removed but the C++ bridge hasn't crashed.
       if (isHardwareConnected) {
@@ -1247,6 +1253,33 @@ async function getPatronAccountSummary(patronCardNumber) {
     };
   }));
 
+  let holds = [];
+  try {
+    const holdsPayload = await kohaRequest(`/holds?patron_id=${patron.patron_id}`);
+    const rawHolds = normalizeCollection(holdsPayload);
+    holds = await Promise.all(rawHolds.filter(h => !h.cancellation_date).map(async (h) => {
+      let title = `Item ${h.item_id || h.biblio_id}`;
+      if (h.biblio_id) {
+        try {
+          const bib = await kohaRequest(`/biblios/${h.biblio_id}`);
+          title = extractTitle(bib) || title;
+        } catch (_) {}
+      }
+      return {
+        holdId: h.hold_id,
+        biblioId: h.biblio_id,
+        itemId: h.item_id,
+        title,
+        queuePosition: h.priority || 1,
+        status: h.found === 'W' ? 'Ready for Pickup' : h.found === 'T' ? 'In Transit' : 'On Hold',
+        pickupDeadline: h.expirationdate || 'N/A',
+        pickupLibrary: h.pickup_library_id || ''
+      };
+    }));
+  } catch (holdError) {
+    logger.warn('Account', `Could not fetch holds: ${holdError.message}`);
+  }
+
   return {
     patronCardNumber,
     patronName: firstNonEmpty([
@@ -1254,7 +1287,8 @@ async function getPatronAccountSummary(patronCardNumber) {
       patron.cardnumber
     ]),
     fineAmount,
-    loans
+    loans,
+    holds
   };
 }
 
@@ -1351,6 +1385,58 @@ async function handleAccount(req, res) {
       success: false,
       message: error.message || 'Unable to fetch account details'
     });
+  }
+}
+
+async function handlePlaceHold(req, res) {
+  const requestId = uuidv4();
+  try {
+    const body = await parseRequestBody(req);
+    const patronCardNumber = String(body.patronCardNumber || '').trim();
+    const barcode = String(body.barcode || '').trim();
+
+    if (!patronCardNumber || !barcode) {
+      sendJson(res, 400, { success: false, message: 'Card number and barcode are required' });
+      return;
+    }
+
+    logger.info('Hold', `[START] Placing hold for ${patronCardNumber} on ${barcode}`, { requestId });
+
+    // Find Patron
+    let patronsPayload = await kohaRequest(`/patrons?cardnumber=${encodeURIComponent(patronCardNumber)}`);
+    let patrons = normalizeCollection(patronsPayload);
+    let patron = findExactMatch(patrons, 'cardnumber', patronCardNumber);
+    if (!patron) {
+      patronsPayload = await kohaRequest(`/patrons?q=${encodeURIComponent(patronCardNumber)}`);
+      patrons = normalizeCollection(patronsPayload);
+      patron = patrons.find(p => String(p.cardnumber || '').trim() === patronCardNumber) || null;
+    }
+    if (!patron) {
+      sendJson(res, 404, { success: false, message: 'Patron not found' });
+      return;
+    }
+
+    // Find item
+    const itemsPayload = await kohaRequest(`/items?external_id=${encodeURIComponent(barcode)}`);
+    const items = normalizeCollection(itemsPayload);
+    const item = findExactMatch(items, 'external_id', barcode) || items[0];
+    if (!item) {
+      sendJson(res, 404, { success: false, message: 'Item not found' });
+      return;
+    }
+
+    const holdPayload = {
+      patron_id: patron.patron_id,
+      biblio_id: item.biblio_id,
+      pickup_library_id: KOHA_CONFIG.libraryId || 'CPL'
+    };
+
+    const response = await kohaPost('/holds', holdPayload);
+    logger.info('Hold', `[SUCCESS] Hold placed for ${patronCardNumber}`, { requestId, holdId: response.hold_id });
+    sendJson(res, 200, { success: true, message: 'Hold placed successfully', hold: response });
+  } catch (error) {
+    logger.error('Hold', `[FAIL] Failed to place hold: ${error.message}`, { requestId });
+    sendJson(res, 500, { success: false, message: error.message || 'Failed to place hold' });
   }
 }
 
@@ -1728,6 +1814,18 @@ const server = http.createServer(async (req, res) => {
       try {
         const bridgeStatus = await proxyRfidRequest('/api/status');
         rfidConnected = (bridgeStatus.status === 'CONNECTED' || bridgeStatus.connected === true);
+        
+        if (bridgeStatus.lastError && /Device not open|failed|Disconnected/i.test(bridgeStatus.lastError)) {
+          rfidConnected = false;
+        }
+        
+        if (rfidConnected) {
+          try {
+            await proxyRfidRequest('/api/tags');
+          } catch (_) {
+            rfidConnected = false;
+          }
+        }
       } catch (_) {}
     }
 
@@ -1799,6 +1897,11 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && reqUrl.pathname === '/api/checkin') {
     await handleCheckin(req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && reqUrl.pathname === '/api/hold') {
+    await handlePlaceHold(req, res);
     return;
   }
 

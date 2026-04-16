@@ -10,7 +10,7 @@
  *  - Cleanly shut down the backend when the Electron app exits
  */
 
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
@@ -112,6 +112,7 @@ function waitForBackend() {
 // ─── Browser Window ─────────────────────────────────────────────────────────────
 function createWindow() {
   mainWindow = new BrowserWindow({
+    show: false,
     width: 1280,
     height: 800,
     minWidth: 1024,
@@ -124,9 +125,10 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true
+      sandbox: true,
+      preload: path.join(__dirname, 'preload.js')
     },
-    backgroundColor: '#f0f8ff'
+    backgroundColor: '#0f172a'
   });
 
   // Remove the menu bar
@@ -179,12 +181,18 @@ function createWindow() {
   // Load the local backend server
   mainWindow.loadURL(BACKEND_URL);
 
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 }
 
 // ─── App Lifecycle ───────────────────────────────────────────────────────────────
+app.commandLine.appendSwitch('kiosk-printing');
+
 app.whenReady().then(async () => {
   startBackend();
 
@@ -221,3 +229,110 @@ app.on('activate', () => {
     createWindow();
   }
 });
+
+// IPC handler for silent printing (thermal receipt printer)
+ipcMain.on('silent-print', (event, htmlContent) => {
+  console.log('[electron] Received silent print request');
+  
+  // Wrap the HTML fragment in a full document with thermal-printer CSS
+  const fullHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    /* Reset everything for thermal printer */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    @page {
+      size: 48mm auto;
+      margin: 0;
+    }
+    html, body {
+      width: 48mm;
+      max-width: 48mm;
+      margin: 0;
+      padding: 0;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 11px;
+      color: #000;
+      background: #fff;
+      -webkit-print-color-adjust: exact;
+      overflow-x: hidden;
+    }
+    body {
+      padding: 1mm;
+    }
+    div, h2, span, strong, b {
+      color: #000 !important;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      max-width: 100%;
+    }
+  </style>
+</head>
+<body>
+  ${htmlContent}
+</body>
+</html>`;
+
+  // Create a hidden window for printing
+  let printWindow = new BrowserWindow({ 
+    show: false,
+    width: 190,
+    height: 600,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true
+    }
+  });
+
+  printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(fullHtml)}`);
+
+  printWindow.webContents.on('did-finish-load', async () => {
+    try {
+      const printers = await printWindow.webContents.getPrintersAsync();
+      const defaultPrinter = printers.find(p => p.isDefault);
+      const printOptions = {
+        silent: true,
+        printBackground: true,
+        margins: {
+          marginType: 'none'
+        },
+        pageSize: {
+          width: 48000,   // 48mm printable area for 58mm thermal printer
+          height: 200000  // 200mm – will auto-cut or scroll
+        }
+      };
+      
+      if (defaultPrinter) {
+        printOptions.deviceName = defaultPrinter.name;
+        console.log(`[electron] Auto-detected default printer: ${defaultPrinter.name}`);
+      } else {
+        console.log('[electron] No default printer detected, using system configuration.');
+      }
+
+      // Small delay to let the renderer fully paint before printing
+      setTimeout(() => {
+        printWindow.webContents.print(printOptions, (success, failureReason) => {
+          if (!success) {
+            console.error('[electron] Silent print failed:', failureReason);
+          } else {
+            console.log('[electron] Silent print succeeded');
+          }
+          
+          // Clean up the window after printing is done
+          if (!printWindow.isDestroyed()) {
+            printWindow.close();
+          }
+        });
+      }, 500);
+    } catch (err) {
+      console.error('[electron] Error detecting printers:', err);
+      if (printWindow && !printWindow.isDestroyed()) {
+        printWindow.close();
+      }
+    }
+  });
+});
+

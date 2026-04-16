@@ -7,7 +7,9 @@
   <title>Punjabi University Library Kiosk</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css?v=7">
   <link rel="stylesheet" href="css/table-styles.css?v=1">
   <link rel="stylesheet" href="css/checkin-styles.css?v=2">
@@ -81,15 +83,35 @@
     }
 
     @keyframes splashPulse {
-      0%, 100% { transform: scale(1); filter: drop-shadow(0 0 20px rgba(14, 165, 233, 0.3)); }
-      50% { transform: scale(1.05); filter: drop-shadow(0 0 30px rgba(14, 165, 233, 0.5)); }
+
+      0%,
+      100% {
+        transform: scale(1);
+        filter: drop-shadow(0 0 20px rgba(14, 165, 233, 0.3));
+      }
+
+      50% {
+        transform: scale(1.05);
+        filter: drop-shadow(0 0 30px rgba(14, 165, 233, 0.5));
+      }
     }
 
     @keyframes splashProgress {
-      0% { width: 0%; }
-      30% { width: 35%; }
-      70% { width: 85%; }
-      100% { width: 100%; }
+      0% {
+        width: 0%;
+      }
+
+      30% {
+        width: 35%;
+      }
+
+      70% {
+        width: 85%;
+      }
+
+      100% {
+        width: 100%;
+      }
     }
 
     /* Offline Screen */
@@ -119,8 +141,13 @@
     }
 
     @keyframes iconShake {
-        0% { transform: rotate(-5deg); }
-        100% { transform: rotate(5deg); }
+      0% {
+        transform: rotate(-5deg);
+      }
+
+      100% {
+        transform: rotate(5deg);
+      }
     }
 
     .offline-title {
@@ -184,8 +211,13 @@
       font-size: 1.1rem;
     }
 
-    .status-value.online { color: #10b981; }
-    .status-value.offline { color: #ef4444; }
+    .status-value.online {
+      color: #10b981;
+    }
+
+    .status-value.offline {
+      color: #ef4444;
+    }
 
     .offline-actions {
       display: flex;
@@ -240,14 +272,14 @@
     }
 
     .header::after {
-        content: '';
-        position: absolute;
-        bottom: 0;
-        left: 30px;
-        right: 30px;
-        height: 3px;
-        background: var(--primary-gradient);
-        border-radius: 10px 10px 0 0;
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 30px;
+      right: 30px;
+      height: 3px;
+      background: var(--primary-gradient);
+      border-radius: 10px 10px 0 0;
     }
 
     .container {
@@ -267,14 +299,14 @@
     }
 
     .powered-by-footer::before {
-        content: '⚛';
-        font-size: 1rem;
-        color: #0ea5e9;
+      content: '⚛';
+      font-size: 1rem;
+      color: #0ea5e9;
     }
   </style>
 </head>
 
-<body>
+<body style="background-color: #0f172a; transition: background-color 0.8s ease;">
   <!-- Splash Screen -->
   <div id="splash-screen">
     <img src="jivesna_logo.png" alt="University Logo" class="splash-logo">
@@ -289,8 +321,9 @@
   <div id="offline-screen">
     <div class="offline-icon">📡</div>
     <h1 class="offline-title">System Communication Error</h1>
-    <p class="offline-desc">The kiosk is having trouble communicating with the systems below. Please ensure all cables are connected and you have internet access.</p>
-    
+    <p class="offline-desc">The kiosk is having trouble communicating with the systems below. Please ensure all cables
+      are connected and you have internet access.</p>
+
     <div class="status-indicators">
       <div class="status-item">
         <div id="status-dot-internet" class="status-dot"></div>
@@ -356,63 +389,133 @@
 
     <!-- Search View -->
     <div id="view-search" class="view">
-        <div class="form-container" style="max-width: 1100px; width: 95vw; height: 750px; display: flex; flex-direction: column;">
-            <h1 class="form-title">🔍 Library Catalog Search</h1>
-            <div style="flex: 1; border: 2px solid #e2e8f0; border-radius: 16px; overflow: hidden; margin-bottom: 2rem; background: white; box-shadow: inset 0 2px 10px rgba(0,0,0,0.02);">
-                <iframe id="search-iframe" src="" style="width: 100%; height: 100%; border: none;"></iframe>
-            </div>
-            <div class="form-actions" style="margin-top: 0; justify-content: flex-end;">
-                <button type="button" class="btn btn-secondary btn-cancel" style="max-width: 200px; border-radius: 12px;">← Back to Home</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- My Account View -->
-    <div id="view-account" class="view">
       <div class="form-container account-container">
-        <h1 class="form-title">My Account</h1>
-        <form id="account-form">
+        <h1 class="form-title">🔍 Library Catalog Search</h1>
+        <form id="search-form">
           <div class="form-group">
-            <label for="account-card" class="form-label">Patron Card Number</label>
-            <input type="text" id="account-card" class="form-input" placeholder="Enter patron card number" required autocomplete="off">
+            <label for="search-input" class="form-label">Search Books</label>
+            <input type="text" id="search-input" class="form-input" placeholder="Title, Author, or ISBN" required
+              autocomplete="off">
           </div>
-
           <div class="form-actions">
             <button type="button" class="btn btn-secondary btn-cancel">Home</button>
             <button type="submit" class="btn btn-primary">Search</button>
           </div>
         </form>
-
-        <div id="account-results" class="account-results" style="display: none;"></div>
+        <div id="search-results" class="account-results" style="display: none;"></div>
       </div>
+    </div>
+
+    <!-- My Account View -->
+    <div id="view-account" class="view">
+      <!-- Login Screen -->
+      <div id="account-login-screen" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 2rem;">
+        <div style="background: white; border-radius: 1rem; box-shadow: 0 20px 60px rgba(0,0,0,0.12); padding: 2.5rem 3rem; max-width: 480px; width: 100%; text-align: center;">
+          <h1 style="font-size: 1.8rem; font-weight: 800; color: #1e293b; margin: 0 0 0.25rem 0;">👤 My Account</h1>
+          <p style="font-size: 1.05rem; color: #64748b; margin: 0 0 2rem 0;">Scan your Library Card to login</p>
+
+          <!-- Card-Tap Illustration -->
+          <div style="margin: 0 auto 1.5rem auto; max-width: 320px;">
+            <img src="card-tap.svg" alt="Tap your card on the reader" style="width: 100%; height: auto;" />
+          </div>
+
+          <!-- Pulsing Status -->
+          <div id="account-reader-status" style="font-size: 1rem; color: #3b82f6; font-weight: 600; animation: pulse-text 2s ease-in-out infinite;">
+            Waiting for card… Place card on reader
+          </div>
+
+          <!-- Error (hidden by default) -->
+          <div id="account-reader-error" style="display: none; font-size: 1rem; color: #ef4444; font-weight: 700; margin-top: 0.75rem;">
+            ❌ Invalid Card
+          </div>
+
+          <!-- Hidden HID input (keyboard wedge) -->
+          <input type="text" id="account-hid-input" autocomplete="off" style="position: absolute; left: -9999px; opacity: 0;" />
+        </div>
+
+        <div style="margin-top: 1.5rem;">
+          <button type="button" class="btn btn-secondary btn-cancel" style="padding: 0.6rem 2rem; border-radius: 12px; font-size: 1rem;">← Home</button>
+        </div>
+      </div>
+
+      <!-- Dashboard (shown after login) -->
+      <div id="account-dashboard" style="display: none; padding: 2rem; max-width: 600px; margin: 0 auto;">
+        <div id="account-results" class="account-results" style="display: none;"></div>
+        <div style="margin-top: 1rem; text-align: left;">
+          <button type="button" class="btn btn-secondary btn-cancel" style="padding: 0.6rem 2rem; border-radius: 12px;">← Home</button>
+        </div>
+      </div>
+
+      <style>
+        @keyframes pulse-text {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+      </style>
     </div>
 
     <!-- Check-Out View -->
     <div id="view-checkout" class="view">
-      <div class="form-container">
-        <h1 class="form-title">📕 Check-Out</h1>
-        <form id="checkout-form">
-          <div class="form-group">
-            <label for="patron-card" class="form-label">Patron Card Number</label>
-            <input type="text" id="patron-card" class="form-input" placeholder="Enter patron card number" required
-              autocomplete="off">
+      <div class="form-container" style="max-width: 600px; padding: 2rem;">
+        <h1 class="form-title"
+          style="margin-bottom: 2rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+          📕 Check-Out
+        </h1>
+        <form id="checkout-form" onsubmit="event.preventDefault(); window.kioskApp?.handleConfirmCheckout?.();">
+          <div class="form-group" style="text-align: left;">
+            <label for="patron-card" class="form-label"
+              style="font-weight: 500; font-size: 0.95rem; color: #475569; margin-bottom: 0.5rem;">Patron Card
+              Number</label>
+            <input type="text" id="patron-card" class="form-input" placeholder="" autocomplete="off"
+              style="border: 1px solid #38bdf8; border-radius: 8px; font-size: 1rem; padding: 0.75rem 1rem;">
             <div id="patron-rfid-status"
-              style="display:none;margin-top:0.75rem;padding:0.7rem 0.9rem;border-radius:12px;background:rgba(14,165,233,0.08);border:1px solid rgba(14,165,233,0.18);color:#0f4c6e;font-size:0.9rem;font-weight:600;">
-              Patron RFID reader: starting...
+              style="margin-top:0.75rem;padding:0.7rem 0.9rem;border-radius:8px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#b91c1c;font-size:0.9rem;font-weight:500;">
+              Patron RFID reader was not selected.
+            </div>
+            <div style="font-size: 0.85rem; color: #64748b; margin-top: 0.5rem; margin-left: 0.1rem;">Demo: Try 11111,
+              22222, or 33333</div>
+          </div>
+
+          <div class="scanning-panel"
+            style="background: rgba(241,245,249,0.5); border: 1px solid #cbd5e1; border-radius: 12px; padding: 1.25rem 1rem; margin-bottom: 1.5rem; text-align: left;">
+            <div
+              style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; font-weight: 500; color: #334155; font-size: 0.95rem;">
+              <span
+                style="width: 10px; height: 10px; background: #10b981; border-radius: 50%; display: inline-block; box-shadow: 0 0 5px rgba(16,185,129,0.5);"></span>
+              <span>Scanning — place books on the RFID reader</span>
+            </div>
+
+            <div id="checkout-scanned-items"
+              style="display: flex; flex-direction: column; gap: 0.75rem; max-height: 250px; overflow-y: auto;">
+              <!-- Items will be added here -->
             </div>
           </div>
 
-          <div class="form-group">
-            <label for="item-barcode" class="form-label">Item Barcode</label>
-            <input type="text" id="item-barcode" class="form-input" placeholder="Scan or enter item barcode" required
-              autocomplete="off">
-          </div>
-
-          <div class="form-actions">
-            <button type="button" class="btn btn-secondary btn-cancel">Cancel</button>
-            <button type="submit" class="btn btn-primary">Submit</button>
+          <div class="form-actions" style="display: flex; gap: 1rem; justify-content: space-between; margin-top: 2rem;">
+            <button type="button" class="btn btn-secondary btn-cancel"
+              style="border-radius: 20px; padding: 0.75rem 2.5rem; background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; font-weight: 600; font-size: 1rem; cursor: pointer; transition: background 0.2s;">
+              Cancel
+            </button>
+            <button type="button" id="btn-confirm-checkout" class="btn btn-primary"
+              style="flex: 1; border-radius: 12px; padding: 0.75rem 2rem; background: #0ea5e9; border: none; display: flex; align-items: center; justify-content: center; gap: 0.5rem; font-weight: 600; font-size: 1rem; cursor: pointer;"
+              disabled>
+              ✓ Confirm Checkout <span id="checkout-item-count"
+                style="background: rgba(255,255,255,0.25); border-radius: 50%; width: 24px; height: 24px; display: inline-flex; justify-content: center; align-items: center; font-size: 0.85rem;">0</span>
+            </button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- Print Receipt View -->
+    <div id="view-print-receipt" class="view">
+      <div class="form-container" style="text-align: center;">
+        <h1 class="form-title">🖨️ Print Receipt?</h1>
+        <p style="margin-bottom: 2rem; font-size: 1.2rem;">Would you like to print a receipt for your transaction?</p>
+        <div class="form-actions" style="justify-content: center; gap: 1rem;">
+          <button type="button" id="btn-print-yes" class="btn btn-primary">Yes, Print</button>
+          <button type="button" id="btn-print-no" class="btn btn-secondary">No, Thanks</button>
+        </div>
       </div>
     </div>
 
@@ -471,13 +574,16 @@
             <button type="button" id="btn-done-checkin" class="btn btn-secondary" style="flex: none;">✓ Done</button>
           </div>
         </div>
+
+
       </div>
     </div>
 
     <!-- Thank You View -->
     <div id="view-thankyou" class="view">
       <div class="thankyou-container">
-        <div class="book-3d-scene">
+        <!-- Checkout Animation -->
+        <div id="thankyou-anim-checkout" class="book-3d-scene">
           <div class="book-3d">
             <div class="book-cover">
               <div class="book-spine"></div>
@@ -486,9 +592,18 @@
             <div class="book-pages"></div>
           </div>
         </div>
+
+        <!-- Checkin Animation / Instruction -->
+        <div id="thankyou-anim-checkin"
+          style="display: none; margin-bottom: 2rem; display: flex; flex-direction: column; align-items: center;">
+          <img src="shelf.svg" alt="Put book on shelf"
+            style="max-width: 100%; height: auto; max-height: 250px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);" />
+        </div>
+
         <h1 class="thankyou-title">Success!</h1>
         <p class="thankyou-message">
-          You checked in <span id="session-count" class="count-badge">0</span> items.
+          You <span id="thankyou-action-text">checked in</span> <span id="session-count" class="count-badge">0</span>
+          items.
         </p>
         <div class="quote-container">
           <p id="thankyou-quote" class="quote-text">“Reading is dreaming with open eyes.”</p>
@@ -499,11 +614,38 @@
 
   <!-- Check-In Success View -->
   <div id="view-checkin-success" class="view">
-    <div class="success-container">
-      <div id="checkin-success-details"></div>
-      <div class="form-actions" style="justify-content: center; margin-top: 2rem;">
-        <button type="button" class="btn btn-primary btn-new">New Check-In</button>
-        <button type="button" class="btn btn-secondary btn-cancel">Home</button>
+    <div class="success-container"
+      style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; text-align: center; gap: 1.5rem; padding: 2rem;">
+      <h1 style="color: #10b981; font-size: 3rem; font-weight: 800; margin-bottom: 0.5rem; letter-spacing: -0.02em;">✅
+        Book Checked In Successfully!</h1>
+      <p style="font-size: 1.4rem; color: #475569; margin-bottom: 1rem; max-width: 600px;">📚 Please arrange the book or
+        put the book on the shelf.</p>
+
+      <div
+        style="background: white; border-radius: 24px; padding: 2rem; box-shadow: 0 15px 35px rgba(0,0,0,0.05); margin-bottom: 1rem; width: 100%; max-width: 500px; display: flex; justify-content: center; align-items: center;">
+        <img src="shelf.svg" alt="Library Shelf" style="height: 250px; width: 100%; object-fit: contain;" />
+      </div>
+
+      <p style="font-size: 1.1rem; color: #64748b; font-style: italic; margin-bottom: 2rem;">Thank you for helping keep
+        the library organized.</p>
+
+      <button type="button" id="btn-final-done" class="btn btn-primary"
+        style="background: #10b981; border: none; padding: 1.2rem 4rem; border-radius: 50px; font-size: 1.2rem; font-weight: 700; box-shadow: 0 10px 20px rgba(16,185,129,0.3); transition: transform 0.2s;">Done</button>
+    </div>
+  </div>
+
+  <!-- Hold Modal -->
+  <div id="hold-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 2rem; border-radius: 16px; max-width: 420px; width: 90%; box-shadow: 0 20px 40px rgba(0,0,0,0.2); margin: auto; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+      <h3 style="margin-top: 0; font-size: 1.3rem; color: #1e293b;">📌 Place Hold / Reserve</h3>
+      <p id="hold-book-title" style="font-weight: 600; color: #334155; margin-bottom: 1rem;"></p>
+      <div style="margin-bottom: 1rem;">
+        <label style="font-size: 0.9rem; color: #475569; font-weight: 500;">Patron Card Number</label>
+        <input type="text" id="hold-patron-input" autocomplete="off" placeholder="Enter your card number" style="width: 100%; padding: 0.75rem 1rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 1rem; margin-top: 0.5rem; box-sizing: border-box;" />
+      </div>
+      <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+        <button type="button" id="btn-cancel-hold" class="btn btn-secondary" style="padding: 0.6rem 1.5rem; border-radius: 8px;">Cancel</button>
+        <button type="button" id="btn-confirm-hold" class="btn btn-primary" style="padding: 0.6rem 1.5rem; border-radius: 8px; background: #3b82f6; border: none; font-weight: 600;">Place Hold</button>
       </div>
     </div>
   </div>

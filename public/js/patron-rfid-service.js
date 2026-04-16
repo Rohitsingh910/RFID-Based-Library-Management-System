@@ -419,30 +419,37 @@ class PatronRfidService {
         const isAccount = window.kioskApp.currentOperation === 'account';
         if (!isCheckout && !isAccount) return;
 
-        const targetInputId = isCheckout ? 'patron-card' : 'account-card';
-        const patronCardEl = document.getElementById(targetInputId);
+        const safeValue = String(tagValue || '').trim();
+        if (!safeValue) return;
+
+        // For "My Account" mode, bypass the hidden input entirely and trigger
+        // the account lookup directly via the HID handler in app.js.
+        if (isAccount) {
+            console.log('[Patron RFID] Triggering account lookup for:', safeValue);
+            this.setStatus(`Patron card captured from CH340${uid ? ` (${uid})` : ''}. Loading account…`, 'ok');
+            if (window.kioskApp._handleHidCardRead) {
+                window.kioskApp._handleHidCardRead(safeValue);
+            }
+            return;
+        }
+
+        // Checkout mode — fill the patron-card input field
+        const patronCardEl = document.getElementById('patron-card');
         if (!patronCardEl) return;
 
         if (patronCardEl.value.trim().length > 0) {
             this.setStatus(
-                isCheckout
-                    ? 'Patron card already filled. Waiting for item barcode from HF FEIG reader.'
-                    : 'Patron card already filled. Press Search to view account.',
+                'Patron card already filled. Waiting for item barcode from HF FEIG reader.',
                 'ok'
             );
             return;
         }
 
-        const safeValue = String(tagValue || '').trim();
-        if (!safeValue) return;
-
         patronCardEl.value = safeValue;
         patronCardEl.dispatchEvent(new Event('input', { bubbles: true }));
         patronCardEl.dispatchEvent(new Event('change', { bubbles: true }));
 
-        if (isCheckout) {
-            document.getElementById('item-barcode')?.focus();
-        }
+        document.getElementById('item-barcode')?.focus();
 
         this.setStatus(`Patron card captured from CH340${uid ? ` (${uid})` : ''}.`, 'ok');
         console.log('[Patron RFID] Filled patron card:', safeValue);
