@@ -1,0 +1,179 @@
+/* ============================================
+   3D Gen Z Home Page Styles
+   ============================================ */
+
+/* Animated Background */
+body {
+    background-color: #f8fafc;
+    background-image:
+        radial-gradient(at 0% 0%, rgba(14, 165, 233, 0.15) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(15, 23, 42, 0.1) 0px, transparent 50%);
+    background-attachment: fixed;
+}
+
+/* Header - Glassmorphism */
+.header {
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.03);
+    padding: 1rem 2rem;
+    margin-bottom: 3rem;
+}
+
+.mode-indicator {
+    background: rgba(15, 23, 42, 0.05);
+    border: 1px solid rgba(15, 23, 42, 0.1);
+    color: var(--text-dark);
+    font-weight: 700;
+}
+
+/* 3D Button Grid */
+.button-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 2.5rem;
+    padding: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+    perspective: 1000px;
+    /* Enable 3D space */
+}
+
+/* 3D Card Button */
+.feature-button {
+    position: relative;
+    background: white;
+    border-radius: 24px;
+    padding: 3rem 2rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    box-shadow:
+        0 10px 20px -5px rgba(15, 23, 42, 0.1),
+        0 8px 8px -6px rgba(14, 165, 233, 0.1);
+    /* Cyan hint */
+    transform-style: preserve-3d;
+    overflow: hidden;
+}
+
+/* Card Hover 3D Lift */
+.feature-button:hover {
+    transform: translateY(-15px) rotateX(5deg);
+    box-shadow:
+        0 25px 30px -5px rgba(15, 23, 42, 0.15),
+        0 15px 15px -6px rgba(14, 165, 233, 0.2);
+    border-color: var(--primary);
+}
+
+/* Cyan Glow Gradient Overlay on Hover */
+.feature-button::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, rgba(14, 165, 233, 0) 0%, rgba(14, 165, 233, 0.05) 100%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: 0;
+}
+
+.feature-button:hover::before {
+    opacity: 1;
+}
+
+/* Large 3D Icons */
+.feature-icon {
+    font-size: 5rem;
+    margin-bottom: 1.5rem;
+    z-index: 1;
+    transition: transform 0.4s ease;
+    filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
+}
+
+.feature-button:hover .feature-icon {
+    transform: scale(1.2) translateZ(20px);
+    /* Pop out */
+}
+
+/* Typography */
+.feature-label {
+    font-size: 1.75rem;
+    font-weight: 800;
+    color: var(--text-dark);
+    z-index: 1;
+    letter-spacing: -0.5px;
+}
+
+.feature-desc {
+    font-size: 1rem;
+    color: var(--text-light);
+    margin-top: 0.5rem;
+    z-index: 1;
+    font-weight: 500;
+}
+
+/* Specific Card Colors (Optional Accents) */
+#btn-checkout:hover .feature-icon {
+    filter: drop-shadow(0 8px 12px rgba(239, 68, 68, 0.3));
+}
+
+#btn-checkin:hover .feature-icon {
+    filter: drop-shadow(0 8px 12px rgba(16, 185, 129, 0.3));
+}
+
+#btn-renew:hover .feature-icon {
+    filter: drop-shadow(0 8px 12px rgba(245, 158, 11, 0.3));
+}
+
+#btn-account:hover .feature-icon {
+    filter: drop-shadow(0 8px 12px rgba(59, 130, 246, 0.3));
+}
+
+/* Welcome Message */
+.welcome-container {
+    text-align: center;
+    margin-bottom: 3rem;
+    animation: fadeInDown 0.8s ease-out;
+}
+
+.welcome-title {
+    font-size: 3.5rem;
+    font-weight: 900;
+    color: var(--text-dark);
+    letter-spacing: -2px;
+    line-height: 1.1;
+}
+
+.welcome-title span {
+    color: var(--primary);
+    display: inline-block;
+    position: relative;
+}
+
+.welcome-subtitle {
+    font-size: 1.25rem;
+    color: var(--text-medium);
+    margin-top: 1rem;
+    font-weight: 500;
+}
+
+@keyframes fadeInDown {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
