@@ -1,0 +1,73 @@
+{
+  "name": "punjabi-university-library-kiosk",
+  "version": "1.0.0",
+  "description": "Punjabi University Smart Library Kiosk - Self-checkout & check-in terminal powered by SoCTeamup Semiconductors",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "electron": "electron .",
+    "build": "electron-builder --win --dir",
+    "build:installer": "electron-builder --win"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "pdfkit": "^0.18.0",
+    "serialport": "^12.0.0"
+  },
+  "devDependencies": {
+    "electron": "^29.0.0",
+    "electron-builder": "^24.13.0"
+  },
+  "build": {
+    "appId": "com.jivesna.library.kiosk",
+    "productName": "Punjabi University Library Kiosk",
+    "copyright": "Powered by SoCTeamup Semiconductors",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/jivesna_logo.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Punjabi University Library Kiosk"
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "server.js",
+      "sip-client.js",
+      "public/**/*",
+      "!public/resize.ps1"
+    ],
+    "extraResources": [
+      {
+        "from": "rfid-integration/build",
+        "to": "rfid-bridge",
+        "filter": [
+          "*.exe",
+          "*.dll"
+        ]
+      }
+    ],
+    "asar": false
+  }
+}
