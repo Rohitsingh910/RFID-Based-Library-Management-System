@@ -1,0 +1,898 @@
+/* ═══════════════════════════════════════════════════════════════
+   RENEW MODULE — Isolated Styles
+   Scope: #view-renew-scan, #view-renew-connecting, #view-renew-items,
+          #view-renew-results, #view-renew-receipt
+   Does NOT touch Check-In / Check-Out / My Account styles.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Shared: make renew views flex-column when active ─────────── */
+#view-renew-scan.active,
+#view-renew-items.active,
+#view-renew-results.active,
+#view-renew-receipt.active {
+  display: flex;
+  flex-direction: column;
+}
+
+#view-renew-connecting.active {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 50vh;
+}
+
+/* ── Shared layout utilities ─────────────────────────────────── */
+.renew-header-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.renew-page-title {
+  font-size: 1.85rem;
+  font-weight: 800;
+  color: #1e293b;
+  margin: 0;
+  letter-spacing: -0.025em;
+  font-family: 'Outfit', 'Inter', sans-serif;
+}
+
+.renew-home-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: #f8fafc;
+  border: 1.5px solid #e2e8f0;
+  color: #475569;
+  font-size: 0.88rem;
+  font-weight: 600;
+  padding: 0.45rem 1rem;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+  font-family: 'Inter', sans-serif;
+}
+.renew-home-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  transform: translateX(-2px);
+}
+
+/* Shared primary / secondary buttons */
+.renew-btn-primary {
+  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
+  color: #fff;
+  border: none;
+  border-radius: 14px;
+  padding: 0.9rem 2.1rem;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 16px -4px rgba(124, 58, 237, 0.45);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: 'Inter', sans-serif;
+}
+.renew-btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 22px -5px rgba(124, 58, 237, 0.55);
+}
+.renew-btn-primary:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.renew-btn-secondary {
+  background: #f1f5f9;
+  color: #334155;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 0.9rem 1.6rem;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: 'Inter', sans-serif;
+}
+.renew-btn-secondary:hover {
+  background: #e2e8f0;
+  border-color: #cbd5e1;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   STEP 1 — Patron Scan
+   ══════════════════════════════════════════════════════════════ */
+.renew-scan-wrapper {
+  width: 100%;
+  max-width: 500px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.renew-scan-card {
+  background: #ffffff;
+  border-radius: 28px;
+  padding: 3.5rem 2.5rem;
+  text-align: center;
+  box-shadow: 0 6px 40px rgba(124, 58, 237, 0.10), 0 1px 6px rgba(0,0,0,0.05);
+  border: 2px solid rgba(124, 58, 237, 0.10);
+  margin-top: 0.5rem;
+}
+
+.renew-card-anim {
+  position: relative;
+  width: 130px;
+  height: 130px;
+  margin: 0 auto 2rem;
+}
+
+.renew-card-pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.18) 0%, rgba(124, 58, 237, 0.04) 70%);
+  animation: renewPulse 2.2s ease-in-out infinite;
+}
+
+@keyframes renewPulse {
+  0%, 100% { transform: scale(0.85); opacity: 0.5; }
+  50%       { transform: scale(1.20); opacity: 1;   }
+}
+
+.renew-card-icon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3.8rem;
+  filter: drop-shadow(0 6px 16px rgba(124, 58, 237, 0.30));
+  animation: renewCardFloat 3.2s ease-in-out infinite;
+}
+
+@keyframes renewCardFloat {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-8px); }
+}
+
+.renew-scan-instruction {
+  font-size: 1.15rem;
+  color: #475569;
+  font-weight: 500;
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+
+.renew-rfid-status {
+  padding: 0.65rem 1rem;
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.07);
+  border: 1px solid rgba(239, 68, 68, 0.18);
+  color: #b91c1c;
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-align: center;
+  transition: all 0.25s ease;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   STEP 2 — Connecting Spinner
+   ══════════════════════════════════════════════════════════════ */
+.renew-connecting-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.75rem;
+  text-align: center;
+}
+
+.renew-spinner-ring {
+  width: 76px;
+  height: 76px;
+  border: 5px solid rgba(124, 58, 237, 0.14);
+  border-top-color: #7c3aed;
+  border-radius: 50%;
+  animation: renewSpin 0.75s linear infinite;
+}
+
+@keyframes renewSpin {
+  to { transform: rotate(360deg); }
+}
+
+.renew-connecting-text {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #334155;
+  font-family: 'Outfit', 'Inter', sans-serif;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   STEP 3 — Items Out
+   ══════════════════════════════════════════════════════════════ */
+.renew-items-wrapper {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.renew-patron-chip {
+  margin-left: auto;
+  background: rgba(124, 58, 237, 0.09);
+  border: 1.5px solid rgba(124, 58, 237, 0.18);
+  color: #5b21b6;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 0.4rem 1rem;
+  border-radius: 20px;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Sections */
+.renew-section {
+  background: #ffffff;
+  border-radius: 18px;
+  border: 1.5px solid #e9edf2;
+  margin-bottom: 1rem;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+}
+
+.renew-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.25rem;
+  background: rgba(248, 250, 252, 0.9);
+  border-bottom: 1px solid #f1f5f9;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.renew-section-label {
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.renew-section-label--green { color: #065f46; }
+.renew-section-label--red   { color: #991b1b; }
+
+.renew-select-controls {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.renew-ctrl-btn {
+  background: none;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.28rem 0.75rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: 'Inter', sans-serif;
+}
+.renew-ctrl-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+/* Item rows */
+.renew-item-list { padding: 0.25rem 0; }
+
+.renew-item-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  padding: 0.9rem 1.25rem;
+  border-bottom: 1px solid #f8fafc;
+  transition: background 0.15s;
+}
+.renew-item-row:last-child { border-bottom: none; }
+.renew-item-row:hover      { background: rgba(124, 58, 237, 0.025); }
+
+.renew-item-checkbox {
+  width: 18px;
+  height: 18px;
+  margin-top: 3px;
+  accent-color: #7c3aed;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.renew-item-checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
+.renew-item-info   { flex: 1; min-width: 0; }
+.renew-item-title  {
+  font-size: 0.94rem;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 0.3rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.renew-item-meta   { font-size: 0.8rem; color: #64748b; line-height: 1.9; }
+.renew-item-meta span { margin-right: 0.6rem; }
+
+.renew-renewals-badge {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(16, 185, 129, 0.10);
+  color: #065f46;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 0.15rem 0.55rem;
+  border-radius: 20px;
+  border: 1px solid rgba(16, 185, 129, 0.22);
+}
+
+.renew-reason-pill {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(239, 68, 68, 0.08);
+  color: #991b1b;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 0.18rem 0.6rem;
+  border-radius: 20px;
+  border: 1px solid rgba(239, 68, 68, 0.18);
+  white-space: nowrap;
+}
+
+/* Not-renewable collapsible section */
+.renew-section-toggle {
+  width: 100%;
+  background: rgba(254, 242, 242, 0.6);
+  border: none;
+  padding: 0.85rem 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+  font-family: inherit;
+}
+.renew-section-toggle:hover { background: rgba(254, 226, 226, 0.7); }
+
+.renew-count-badge {
+  background: rgba(239, 68, 68, 0.12);
+  color: #991b1b;
+  font-size: 0.74rem;
+  font-weight: 800;
+  padding: 0.1rem 0.5rem;
+  border-radius: 20px;
+}
+
+.renew-toggle-arrow {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  transition: transform 0.22s ease;
+}
+.renew-toggle-arrow.collapsed { transform: rotate(180deg); }
+
+.renew-nonrenewable-list {
+  max-height: 320px;
+  overflow-y: auto;
+  transition: max-height 0.25s ease;
+}
+.renew-nonrenewable-list.collapsed { display: none; }
+
+.renew-empty-msg {
+  padding: 2rem 1.5rem;
+  text-align: center;
+  color: #64748b;
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+.renew-items-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   STEP 5 — Results
+   ══════════════════════════════════════════════════════════════ */
+.renew-results-wrapper {
+  width: 100%;
+  max-width: 620px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.renew-results-heading {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: #1e293b;
+  margin-bottom: 1.5rem;
+  letter-spacing: -0.025em;
+  font-family: 'Outfit', 'Inter', sans-serif;
+}
+
+.renew-results-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-bottom: 1.75rem;
+  max-height: 58vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.renew-result-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.9rem;
+  padding: 1rem 1.15rem;
+  border-radius: 14px;
+  border: 1.5px solid;
+  opacity: 0;
+  animation: renewRowIn 0.32s ease forwards;
+}
+
+@keyframes renewRowIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.renew-result-row.success {
+  background: rgba(16, 185, 129, 0.05);
+  border-color: rgba(16, 185, 129, 0.22);
+}
+.renew-result-row.fail {
+  background: rgba(239, 68, 68, 0.04);
+  border-color: rgba(239, 68, 68, 0.18);
+}
+
+.renew-result-icon  { font-size: 1.5rem; flex-shrink: 0; margin-top: 1px; }
+.renew-result-info  { flex: 1; min-width: 0; }
+.renew-result-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 0.2rem;
+}
+.renew-result-status        { font-size: 0.82rem; font-weight: 500; }
+.renew-result-row.success .renew-result-status { color: #065f46; }
+.renew-result-row.fail    .renew-result-status { color: #991b1b; }
+
+.renew-results-footer {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Receipt Options
+   ══════════════════════════════════════════════════════════════ */
+.renew-receipt-wrapper {
+  width: 100%;
+  max-width: 540px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.renew-receipt-subtitle {
+  color: #64748b;
+  font-size: 1rem;
+  margin-bottom: 2rem;
+  margin-top: 0.25rem;
+}
+
+.renew-receipt-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  width: 100%;
+  margin-bottom: 1.5rem;
+}
+
+.renew-receipt-choice {
+  background: #ffffff;
+  border: 2px solid #e2e8f0;
+  border-radius: 22px;
+  padding: 2rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.7rem;
+  cursor: pointer;
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  font-family: 'Inter', sans-serif;
+}
+.renew-receipt-choice:hover:not(:disabled) {
+  border-color: #7c3aed;
+  background: rgba(124, 58, 237, 0.03);
+  transform: translateY(-4px);
+  box-shadow: 0 10px 24px -5px rgba(124, 58, 237, 0.18);
+}
+.renew-receipt-choice:active:not(:disabled) { transform: translateY(-1px); }
+.renew-receipt-choice:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.receipt-choice-icon  { font-size: 2.4rem; }
+.receipt-choice-label { font-size: 0.9rem; font-weight: 700; color: #334155; }
+
+/* Confirmation message */
+.renew-receipt-confirm {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  animation: renewRowIn 0.35s ease forwards;
+}
+
+.renew-receipt-confirm-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  font-size: 1.6rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 18px -4px rgba(16, 185, 129, 0.45);
+}
+
+#renew-receipt-confirm-text {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+/* Go Back button — top of receipt screen */
+.renew-receipt-back-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: #f8fafc;
+  border: 1.5px solid #e2e8f0;
+  color: #475569;
+  font-size: 0.86rem;
+  font-weight: 600;
+  padding: 0.42rem 1rem;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  font-family: 'Inter', sans-serif;
+  margin-bottom: 1rem;
+}
+.renew-receipt-back-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  transform: translateX(-2px);
+}
+
+/* Loading state: spin overlay on the clicked button */
+.renew-receipt-choice.loading {
+  pointer-events: none;
+  position: relative;
+  color: transparent; /* hide text without DOM change */
+}
+.renew-receipt-choice.loading::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 28px;
+  height: 28px;
+  border: 3px solid rgba(124, 58, 237, 0.18);
+  border-top-color: #7c3aed;
+  border-radius: 50%;
+  animation: renewSpin 0.7s linear infinite;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   QR RECEIPT PANEL — Renew Flow Only
+   Scope: #qr-receipt-panel inside #view-renew-receipt
+   Does NOT affect Check-In / Check-Out / Account screens.
+   ══════════════════════════════════════════════════════════════ */
+
+/* Outer layout: QR panel LEFT + existing receipt options RIGHT */
+.renew-receipt-outer {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;          /* both columns grow to same height */
+  gap: 1.5rem;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+/* Existing wrapper now lives inside renew-receipt-outer */
+.renew-receipt-outer .renew-receipt-wrapper {
+  flex: 1;
+  max-width: none;
+  margin: 0;
+  align-items: flex-start;
+  text-align: left;
+}
+
+/* ── QR Panel Card ──────────────────────────────────────────── */
+.qr-receipt-panel {
+  flex: 0 0 280px;
+  background: linear-gradient(145deg, #f8faff 0%, #f0f4ff 100%);
+  border: 2px solid rgba(124, 58, 237, 0.14);
+  border-radius: 24px;
+  padding: 1.75rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;       /* keep content centred vertically */
+  gap: 1rem;
+  box-shadow:
+    0 4px 24px rgba(124, 58, 237, 0.08),
+    0 1px 4px rgba(0, 0, 0, 0.04);
+  position: relative;
+                                 /* no fixed min-height — stretch handles height */
+}
+
+.qr-panel-title {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7c3aed;
+  text-align: center;
+}
+
+/* ── Idle State: CTA Button ─────────────────────────────────── */
+#qr-state-idle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+  width: 100%;
+}
+
+.qr-idle-icon {
+  font-size: 3.2rem;
+  filter: drop-shadow(0 4px 12px rgba(124, 58, 237, 0.28));
+  animation: renewCardFloat 3.5s ease-in-out infinite;
+}
+
+.qr-cta-btn {
+  width: 100%;
+  background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%);
+  color: #fff;
+  border: none;
+  border-radius: 14px;
+  padding: 0.9rem 1.25rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-family: 'Inter', sans-serif;
+  box-shadow: 0 4px 18px -4px rgba(124, 58, 237, 0.5);
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  letter-spacing: 0.01em;
+}
+.qr-cta-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px -5px rgba(124, 58, 237, 0.6);
+}
+.qr-cta-btn:active { transform: translateY(0); }
+
+/* ── Loading State ──────────────────────────────────────────── */
+#qr-state-loading {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.qr-loading-ring {
+  width: 52px;
+  height: 52px;
+  border: 4px solid rgba(124, 58, 237, 0.15);
+  border-top-color: #7c3aed;
+  border-radius: 50%;
+  animation: renewSpin 0.7s linear infinite;
+}
+
+.qr-loading-text {
+  font-size: 0.85rem;
+  color: #64748b;
+  font-weight: 500;
+  font-family: 'Inter', sans-serif;
+}
+
+/* ── Active State: QR + Countdown ───────────────────────────── */
+#qr-state-active {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+  width: 100%;
+}
+
+.qr-code-box {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 0.75rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  border: 2px solid rgba(124, 58, 237, 0.10);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 230px;
+  min-height: 230px;
+}
+
+#qr-code-display img,
+#qr-code-display canvas {
+  display: block;
+  border-radius: 6px;
+}
+
+/* Countdown SVG ring */
+.qr-countdown-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.qr-countdown-svg {
+  transform: rotate(-90deg);
+}
+
+#qr-countdown-circle {
+  transition: stroke-dashoffset 1s linear;
+  stroke-linecap: round;
+}
+
+.qr-countdown-label {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #5b21b6;
+  font-family: 'Inter', sans-serif;
+  letter-spacing: 0.02em;
+}
+
+.qr-scan-hint {
+  font-size: 0.78rem;
+  color: #64748b;
+  text-align: center;
+  font-family: 'Inter', sans-serif;
+  line-height: 1.5;
+}
+
+/* Wi-Fi hint (local-only URLs) */
+.qr-wifi-hint {
+  background: rgba(245, 158, 11, 0.10);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 10px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  color: #92400e;
+  font-weight: 500;
+  text-align: center;
+  font-family: 'Inter', sans-serif;
+  line-height: 1.5;
+}
+
+/* ── Success State ──────────────────────────────────────────── */
+#qr-state-success {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  animation: renewRowIn 0.38s ease forwards;
+}
+
+.qr-success-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  font-size: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 24px -4px rgba(16, 185, 129, 0.5);
+}
+
+.qr-success-text {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #065f46;
+  text-align: center;
+  font-family: 'Inter', sans-serif;
+  line-height: 1.5;
+}
+
+/* ── Expired State ──────────────────────────────────────────── */
+#qr-state-expired {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.qr-expired-icon {
+  font-size: 2.6rem;
+  filter: grayscale(0.3);
+}
+
+.qr-expired-text {
+  font-size: 0.85rem;
+  color: #991b1b;
+  font-weight: 600;
+  text-align: center;
+  font-family: 'Inter', sans-serif;
+  line-height: 1.5;
+}
+
+.qr-retry-btn {
+  background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  padding: 0.7rem 1.4rem;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+  box-shadow: 0 4px 14px -4px rgba(124, 58, 237, 0.45);
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.qr-retry-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 20px -5px rgba(124, 58, 237, 0.55); }
+
+/* ── Responsive: stack vertically on narrow displays ────────── */
+@media (max-width: 700px) {
+  .renew-receipt-outer {
+    flex-direction: column;
+  }
+  .qr-receipt-panel {
+    flex: none;
+    width: 100%;
+  }
+  .renew-receipt-outer .renew-receipt-wrapper {
+    align-items: center;
+    text-align: center;
+  }
+}

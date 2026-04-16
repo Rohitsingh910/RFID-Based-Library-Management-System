@@ -9,3 +9,4 @@ rfid-integration/build/*.class
 rfid-integration/build/*.javap.txt
 rfid-integration/Mr101RfidBridge.obj
 public/resize.ps1
+.env

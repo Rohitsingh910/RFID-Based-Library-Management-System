@@ -11,6 +11,8 @@
     "build:installer": "electron-builder --win"
   },
   "dependencies": {
+    "dotenv": "^16.6.1",
+    "pdfkit": "^0.18.0",
     "serialport": "^12.0.0"
   },
   "devDependencies": {
@@ -25,6 +27,15 @@
       "target": [
         {
           "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
           "arch": ["x64"]
         },
         {
@@ -46,6 +57,7 @@
     },
     "files": [
       "main.js",
+      "preload.js",
       "server.js",
       "sip-client.js",
       "public/**/*",
@@ -55,6 +67,10 @@
       {
         "from": "rfid-integration/build",
         "to": "rfid-bridge",
+        "filter": [
+          "*.exe",
+          "*.dll"
+        ]
         "filter": ["*.exe", "*.dll"]
       }
     ],

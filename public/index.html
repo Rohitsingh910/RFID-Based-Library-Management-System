@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="css/table-styles.css?v=1">
   <link rel="stylesheet" href="css/checkin-styles.css?v=2">
   <link rel="stylesheet" href="css/home-3d.css?v=1">
+  <link rel="stylesheet" href="css/renew-styles.css?v=1">
   <style>
     :root {
       --primary-gradient: linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%);
@@ -379,6 +380,28 @@
           <div class="feature-label">My Account</div>
           <div class="feature-desc">Manage loans & fines</div>
         </div>
+        <div id="btn-renew" class="feature-button">
+          <span class="feature-icon">🔄</span>
+          <div class="feature-label">Renew</div>
+          <div class="feature-desc">Extend your loan period</div>
+        </div>
+
+      </div>
+    </div>
+
+
+
+    <!-- My Account View -->
+    <div id="view-account" class="view">
+      <div class="form-container account-container">
+        <h1 class="form-title">My Account</h1>
+        <form id="account-form">
+          <div class="form-group">
+            <label for="account-card" class="form-label">Patron Card Number</label>
+            <input type="text" id="account-card" class="form-input" placeholder="Enter patron card number" required
+              autocomplete="off">
+          </div>
+
         <div id="btn-search" class="feature-button">
           <span class="feature-icon">🔍</span>
           <div class="feature-label">Search Catalog</div>
@@ -402,6 +425,9 @@
             <button type="submit" class="btn btn-primary">Search</button>
           </div>
         </form>
+
+        <div id="account-results" class="account-results" style="display: none;"></div>
+      </div>
         <div id="search-results" class="account-results" style="display: none;"></div>
       </div>
     </div>
@@ -582,6 +608,7 @@
     <!-- Thank You View -->
     <div id="view-thankyou" class="view">
       <div class="thankyou-container">
+        <div class="book-3d-scene">
         <!-- Checkout Animation -->
         <div id="thankyou-anim-checkout" class="book-3d-scene">
           <div class="book-3d">
@@ -592,6 +619,9 @@
             <div class="book-pages"></div>
           </div>
         </div>
+        <h1 class="thankyou-title">Success!</h1>
+        <p class="thankyou-message">
+          You checked in <span id="session-count" class="count-badge">0</span> items.
 
         <!-- Checkin Animation / Instruction -->
         <div id="thankyou-anim-checkin"
@@ -612,6 +642,196 @@
     </div>
   </div>
 
+  <!-- ══ RENEW MODULE: 5-STEP FLOW ══════════════════════════════════════ -->
+
+  <!-- Step 1: Patron Scan Screen -->
+  <div id="view-renew-scan" class="view">
+    <div class="renew-scan-wrapper">
+      <div class="renew-header-bar">
+        <button type="button" class="renew-home-btn btn-cancel">← Home</button>
+        <h1 class="renew-page-title">🔄 Renew Items</h1>
+      </div>
+      <div class="renew-scan-card">
+        <div class="renew-card-anim">
+          <div class="renew-card-pulse"></div>
+          <div class="renew-card-icon">💳</div>
+        </div>
+        <p class="renew-scan-instruction">Place your library card on the reader</p>
+        <div id="renew-patron-status" class="renew-rfid-status">
+          Waiting for patron RFID reader…
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2: Connecting Spinner -->
+  <div id="view-renew-connecting" class="view">
+    <div class="renew-connecting-wrapper">
+      <div class="renew-spinner-ring"></div>
+      <p class="renew-connecting-text">Connecting to your account…</p>
+    </div>
+  </div>
+
+  <!-- Step 3: Items Out (renewable + not-renewable sections) -->
+  <div id="view-renew-items" class="view">
+    <div class="renew-items-wrapper">
+      <div class="renew-header-bar">
+        <button type="button" id="renew-items-back" class="renew-home-btn">← Back</button>
+        <div id="renew-patron-chip" class="renew-patron-chip">👤 —</div>
+      </div>
+      <h1 class="renew-page-title" style="margin-bottom:1.25rem;">Items Out</h1>
+
+      <!-- Section A: Renewable Items -->
+      <div class="renew-section" id="renew-section-renewable">
+        <div class="renew-section-header">
+          <span class="renew-section-label renew-section-label--green">✅ Renewable Items</span>
+          <div class="renew-select-controls">
+            <button type="button" id="renew-select-all" class="renew-ctrl-btn">Select All</button>
+            <button type="button" id="renew-clear-all"  class="renew-ctrl-btn">Clear</button>
+          </div>
+        </div>
+        <div id="renew-renewable-list" class="renew-item-list"></div>
+        <div id="renew-no-renewable" class="renew-empty-msg" style="display:none;">
+          No items are currently eligible for renewal.
+        </div>
+      </div>
+
+      <!-- Section B: Not Renewable Items (collapsible) -->
+      <div class="renew-section" id="renew-section-nonrenewable" style="display:none;">
+        <button type="button" id="renew-nonrenewable-toggle" class="renew-section-toggle">
+          <span class="renew-section-label renew-section-label--red">🚫 Not Renewable</span>
+          <span id="renew-nonrenewable-count" class="renew-count-badge">0</span>
+          <span id="renew-toggle-arrow" class="renew-toggle-arrow">▲</span>
+        </button>
+        <div id="renew-nonrenewable-list" class="renew-item-list renew-nonrenewable-list"></div>
+      </div>
+
+      <!-- Footer: Renew Selected button -->
+      <div class="renew-items-footer">
+        <button type="button" id="btn-renew-selected" class="renew-btn-primary">🔄 Renew Selected</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 5: Results Screen -->
+  <div id="view-renew-results" class="view">
+    <div class="renew-results-wrapper">
+      <h1 class="renew-results-heading">Renewal Results</h1>
+      <div id="renew-results-list" class="renew-results-list"></div>
+      <div class="renew-results-footer">
+        <button type="button" id="btn-renew-account"  class="renew-btn-secondary">👤 Account</button>
+        <button type="button" id="btn-renew-finished" class="renew-btn-primary">Finished →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Receipt Options -->
+  <div id="view-renew-receipt" class="view">
+    <!-- Outer: QR panel LEFT + existing receipt options RIGHT -->
+    <div class="renew-receipt-outer">
+
+      <!-- ══ QR RECEIPT PANEL (new, Renew-only) ══════════════════════ -->
+      <div class="qr-receipt-panel" id="qr-receipt-panel">
+        <span class="qr-panel-title">📱 Mobile Receipt</span>
+
+        <!-- State: Idle — big CTA -->
+        <div id="qr-state-idle">
+          <div class="qr-idle-icon">&#x1F4F1;</div>
+          <button type="button" class="qr-cta-btn" id="btn-qr-generate">
+            &#x1F4F7;&nbsp; Click to QR Scan
+          </button>
+        </div>
+
+        <!-- State: Loading -->
+        <div id="qr-state-loading" style="display:none;">
+          <div class="qr-loading-ring"></div>
+          <span class="qr-loading-text">Generating receipt…</span>
+        </div>
+
+        <!-- State: Active — show QR + countdown -->
+        <div id="qr-state-active" style="display:none;">
+          <div class="qr-code-box">
+            <div id="qr-code-display"></div>
+          </div>
+
+          <!-- Animated countdown ring -->
+          <div class="qr-countdown-wrap">
+            <svg class="qr-countdown-svg" width="60" height="60" viewBox="0 0 100 100">
+              <!-- Track -->
+              <circle cx="50" cy="50" r="44"
+                fill="none" stroke="rgba(124,58,237,0.12)" stroke-width="8"/>
+              <!-- Progress arc -->
+              <circle id="qr-countdown-circle" cx="50" cy="50" r="44"
+                fill="none" stroke="#7c3aed" stroke-width="8"
+                stroke-dasharray="276.46" stroke-dashoffset="0"/>
+            </svg>
+            <span class="qr-countdown-label" id="qr-countdown-label">180s</span>
+          </div>
+
+          <p class="qr-scan-hint">Scan with your phone camera<br>to download PDF receipt</p>
+
+          <!-- Wi-Fi hint (shown only when local URL is used) -->
+          <div class="qr-wifi-hint" id="qr-wifi-hint" style="display:none;">
+            &#9888;&#xFE0F; If QR doesn't open,<br>connect to library Wi&#8209;Fi.
+          </div>
+        </div>
+
+        <!-- State: Success — phone downloaded the PDF -->
+        <div id="qr-state-success" style="display:none;">
+          <div class="qr-success-icon">&#x2713;</div>
+          <p class="qr-success-text">Receipt sent successfully.<br>Thank you!</p>
+        </div>
+
+        <!-- State: Expired -->
+        <div id="qr-state-expired" style="display:none;">
+          <div class="qr-expired-icon">&#x23F1;&#xFE0F;</div>
+          <p class="qr-expired-text">QR expired.<br>Please click again.</p>
+          <button type="button" class="qr-retry-btn" id="btn-qr-retry">
+            &#x1F504;&nbsp;Try Again
+          </button>
+        </div>
+      </div>
+      <!-- ══ END QR RECEIPT PANEL ═══════════════════════════════════ -->
+
+      <!-- Existing receipt options — unchanged -->
+      <div class="renew-receipt-wrapper">
+        <button type="button" id="receipt-btn-back" class="renew-receipt-back-btn">&#8592; Back to Results</button>
+        <h1 class="renew-page-title">Receipt Options</h1>
+        <p class="renew-receipt-subtitle">How would you like your renewal receipt?</p>
+        <div class="renew-receipt-grid">
+          <button type="button" class="renew-receipt-choice" id="receipt-btn-print" data-receipt="print">
+            <span class="receipt-choice-icon">🖨️</span>
+            <span class="receipt-choice-label">Print Receipt</span>
+          </button>
+          <button type="button" class="renew-receipt-choice" id="receipt-btn-email" data-receipt="email">
+            <span class="receipt-choice-icon">✉️</span>
+            <span class="receipt-choice-label">Email Receipt</span>
+          </button>
+          <button type="button" class="renew-receipt-choice" id="receipt-btn-both" data-receipt="both">
+            <span class="receipt-choice-icon">📋</span>
+            <span class="receipt-choice-label">Print &amp; Email</span>
+          </button>
+          <button type="button" class="renew-receipt-choice" id="receipt-btn-none" data-receipt="none">
+            <span class="receipt-choice-icon">🚫</span>
+            <span class="receipt-choice-label">No Receipt</span>
+          </button>
+        </div>
+        <div id="renew-receipt-confirm" class="renew-receipt-confirm" style="display:none;">
+          <div class="renew-receipt-confirm-icon">&#10003;</div>
+          <div id="renew-receipt-confirm-text">Done!</div>
+        </div>
+      </div>
+
+    </div><!-- end .renew-receipt-outer -->
+  </div>
+
+  <!-- Check-In Success View -->
+  <div id="view-checkin-success" class="view">
+    <div class="success-container">
+      <div id="checkin-success-details"></div>
+      <div class="form-actions" style="justify-content: center; margin-top: 2rem;">
+        <button type="button" class="btn btn-primary btn-new">New Check-In</button>
+        <button type="button" class="btn btn-secondary btn-cancel">Home</button>
   <!-- Check-In Success View -->
   <div id="view-checkin-success" class="view">
     <div class="success-container"
@@ -662,6 +882,8 @@
   <script src="js/app.js"></script>
   <script src="js/patron-rfid-service.js"></script>
   <script src="js/rfid-service.js"></script>
+  <script src="js/qrcode.min.js"></script>
+  <script src="js/qr-receipt.js"></script>
 </body>
 
 </html>

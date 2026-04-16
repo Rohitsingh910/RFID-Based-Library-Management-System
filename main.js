@@ -230,6 +230,45 @@ app.on('activate', () => {
   }
 });
 
+// IPC handler for silent printing — returns { success, error } to renderer
+ipcMain.handle('silent-print', async (event, htmlContent) => {
+  console.log('[electron] Received silent-print request');
+
+  return new Promise((resolve) => {
+    let printWindow = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true
+      }
+    });
+
+    printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+
+    printWindow.webContents.on('did-finish-load', () => {
+      printWindow.webContents.print(
+        { silent: true, printBackground: true, deviceName: '' },
+        (success, failureReason) => {
+          try { printWindow.close(); } catch (_) {}
+          printWindow = null;
+          if (success) {
+            console.log('[electron] Silent print succeeded');
+            resolve({ success: true, error: null });
+          } else {
+            console.error('[electron] Silent print failed:', failureReason);
+            resolve({ success: false, error: failureReason || 'Unknown print failure' });
+          }
+        }
+      );
+    });
+
+    // Safety: if window load itself fails, resolve with failure
+    printWindow.webContents.on('did-fail-load', (e, code, desc) => {
+      try { printWindow.close(); } catch (_) {}
+      printWindow = null;
+      resolve({ success: false, error: `Page load failed: ${desc}` });
+    });
 // IPC handler for silent printing (thermal receipt printer)
 ipcMain.on('silent-print', (event, htmlContent) => {
   console.log('[electron] Received silent print request');

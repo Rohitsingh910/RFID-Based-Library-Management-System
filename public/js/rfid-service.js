@@ -118,6 +118,10 @@ class RFIDService {
             }
 
             const isCheckout = (typeof window.kioskApp !== 'undefined' && window.kioskApp.currentOperation === 'checkout');
+            const isRenew    = (typeof window.kioskApp !== 'undefined' && window.kioskApp.currentOperation === 'renew');
+            const scanningEnabled = (typeof window.kioskApp !== 'undefined' && window.kioskApp.scanningEnabled) || false;
+
+            if (!scanningEnabled && !isCheckout && !isRenew) {
             const scanningEnabled = (typeof window.kioskApp !== 'undefined' && window.kioskApp.scanningEnabled) || false;
 
             if (!scanningEnabled && !isCheckout) {
@@ -188,6 +192,14 @@ class RFIDService {
                     continue;
                 }
 
+                if (isRenew && scanningEnabled) {
+                    this.processedAppearances.add(dedupeKey);
+                    console.log(`[RFID] Renew item tag: ${barcode} (UID: ${uid})`);
+                    this.checkinQueue.push({ barcode, uid, isRenew: true });
+                    this._drainCheckinQueue();
+                    continue;
+                }
+
                 if (scanningEnabled) {
                     this.processedAppearances.add(dedupeKey);
                     console.log(`[RFID] Queuing checkin tag: ${barcode} (UID: ${uid})`);
@@ -216,6 +228,10 @@ class RFIDService {
                 console.log(`[RFID] Processing: ${nextTag.barcode} (UID: ${nextTag.uid})`);
                 if (nextTag.isCheckout) {
                     await window.kioskApp.processCheckoutTag(nextTag);
+                } else if (nextTag.isRenew) {
+                    if (window.kioskApp?.handleRenewScan) {
+                        window.kioskApp.handleRenewScan(nextTag.barcode);
+                    }
                 } else {
                     await window.kioskApp.processBarcode(nextTag);
                 }
