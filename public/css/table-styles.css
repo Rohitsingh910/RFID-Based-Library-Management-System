@@ -1,0 +1,74 @@
+/* Table styles appended after line 476 */
+
+/* ============================================
+   Check-In Results Table
+   ============================================ */
+.result-container {
+    margin-top: 2rem;
+}
+
+.results-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--white);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+}
+
+.results-table thead {
+    background: var(--primary);
+    color: var(--white);
+}
+
+.results-table th {
+    padding: 1rem;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.results-table td {
+    padding: 0.875rem 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.results-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.result-row {
+    animation: slideIn 0.3s ease-out;
+}
+
+.result-row.success {
+    background: #f0fdf4;
+}
+
+.result-row.error {
+    background: #fef2f2;
+}
+
+.book-name {
+    font-weight: 600;
+    color: var(--text-dark);
+}
+
+.status {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.success-status {
+    color: #166534;
+}
+
+.error-status {
+    color: #991b1b;
+    font-size: 0.9rem;
+}
+
+.timestamp {
+    color: var(--text-light);
+    font-size: 0.85rem;
+}
