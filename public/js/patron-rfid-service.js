@@ -76,6 +76,19 @@ class PatronRfidService {
         await this.requestAndConnect();
     }
 
+    async beginRenewSession() {
+        this.resetSession();
+        this.setStatus('Renew ready. Waiting for patron RFID card...', 'ok');
+
+        if (this.port) {
+            await this.send('IDLE\n');
+            await this.send('READ_MODE\n');
+            return;
+        }
+
+        await this.requestAndConnect();
+    }
+
     async tryAutoConnect() {
         if (this.port || this.isConnecting || !('serial' in navigator)) return;
 
@@ -421,6 +434,43 @@ class PatronRfidService {
 
         const targetInputId = isCheckout ? 'patron-card' : 'account-card';
         const patronCardEl = document.getElementById(targetInputId);
+        const isAccount  = window.kioskApp.currentOperation === 'account';
+        const isRenew    = window.kioskApp.currentOperation === 'renew';
+
+        if (!isCheckout && !isAccount && !isRenew) return;
+        const isAccount = window.kioskApp.currentOperation === 'account';
+        if (!isCheckout && !isAccount) return;
+
+        const safeValue = String(tagValue || '').trim();
+        if (!safeValue) return;
+
+        // Renew: delegate to kioskApp.handleRenewPatronScan
+        if (isRenew) {
+            // Only accept scan while the patron scan screen is shown; ignore after navigation
+            if (window.kioskApp.currentView !== 'renew-scan') {
+                return;
+            }
+            window.kioskApp.handleRenewPatronScan(safeValue);
+            this.setStatus(`Patron card scanned successfully.`, 'ok');
+            console.log('[Patron RFID] Renew patron card captured:', safeValue);
+            return;
+        }
+
+        const targetInputId = isCheckout ? 'patron-card' : 'account-card';
+        const patronCardEl = document.getElementById(targetInputId);
+        // For "My Account" mode, bypass the hidden input entirely and trigger
+        // the account lookup directly via the HID handler in app.js.
+        if (isAccount) {
+            console.log('[Patron RFID] Triggering account lookup for:', safeValue);
+            this.setStatus(`Patron card captured from CH340${uid ? ` (${uid})` : ''}. Loading account…`, 'ok');
+            if (window.kioskApp._handleHidCardRead) {
+                window.kioskApp._handleHidCardRead(safeValue);
+            }
+            return;
+        }
+
+        // Checkout mode — fill the patron-card input field
+        const patronCardEl = document.getElementById('patron-card');
         if (!patronCardEl) return;
 
         if (patronCardEl.value.trim().length > 0) {
@@ -428,6 +478,7 @@ class PatronRfidService {
                 isCheckout
                     ? 'Patron card already filled. Waiting for item barcode from HF FEIG reader.'
                     : 'Patron card already filled. Press Search to view account.',
+                'Patron card already filled. Waiting for item barcode from HF FEIG reader.',
                 'ok'
             );
             return;
@@ -443,6 +494,7 @@ class PatronRfidService {
         if (isCheckout) {
             document.getElementById('item-barcode')?.focus();
         }
+        document.getElementById('item-barcode')?.focus();
 
         this.setStatus(`Patron card captured from CH340${uid ? ` (${uid})` : ''}.`, 'ok');
         console.log('[Patron RFID] Filled patron card:', safeValue);
@@ -493,6 +545,29 @@ class PatronRfidService {
     }
 
     setStatus(message, type = 'info') {
+        const elements = [
+            document.getElementById('patron-rfid-status'),
+            document.getElementById('renew-patron-status')
+        ].filter(Boolean);
+
+        for (const el of elements) {
+            el.style.display = 'block';
+            el.textContent = message;
+
+            if (type === 'ok') {
+                el.style.background = 'rgba(16,185,129,0.10)';
+                el.style.borderColor = 'rgba(16,185,129,0.24)';
+                el.style.color = '#0f6b42';
+            } else if (type === 'error') {
+                el.style.background = 'rgba(239,68,68,0.10)';
+                el.style.borderColor = 'rgba(239,68,68,0.22)';
+                el.style.color = '#9f1d1d';
+            } else {
+                el.style.background = 'rgba(14,165,233,0.08)';
+                el.style.borderColor = 'rgba(14,165,233,0.18)';
+                el.style.color = '#0f4c6e';
+            }
+        }
         if (!this.statusEl) return;
 
         this.statusEl.style.display = 'block';

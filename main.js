@@ -194,6 +194,7 @@ function createWindow() {
 }
 
 // ─── App Lifecycle ───────────────────────────────────────────────────────────────
+app.commandLine.appendSwitch('kiosk-printing');
 
 app.whenReady().then(async () => {
   startBackend();
@@ -338,5 +339,148 @@ ipcMain.handle('print-receipt', async (event, htmlContent) => {
     console.error('[Printing] CRITICAL ERROR in handler:', err);
     return { success: false, error: err.message };
   }
+// IPC handler for silent printing — returns { success, error } to renderer
+ipcMain.handle('silent-print', async (event, htmlContent) => {
+  console.log('[electron] Received silent-print request');
+
+  return new Promise((resolve) => {
+    let printWindow = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true
+      }
+    });
+
+    printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+
+    printWindow.webContents.on('did-finish-load', () => {
+      printWindow.webContents.print(
+        { silent: true, printBackground: true, deviceName: '' },
+        (success, failureReason) => {
+          try { printWindow.close(); } catch (_) {}
+          printWindow = null;
+          if (success) {
+            console.log('[electron] Silent print succeeded');
+            resolve({ success: true, error: null });
+          } else {
+            console.error('[electron] Silent print failed:', failureReason);
+            resolve({ success: false, error: failureReason || 'Unknown print failure' });
+          }
+        }
+      );
+    });
+
+    // Safety: if window load itself fails, resolve with failure
+    printWindow.webContents.on('did-fail-load', (e, code, desc) => {
+      try { printWindow.close(); } catch (_) {}
+      printWindow = null;
+      resolve({ success: false, error: `Page load failed: ${desc}` });
+    });
+// IPC handler for silent printing (thermal receipt printer)
+ipcMain.on('silent-print', (event, htmlContent) => {
+  console.log('[electron] Received silent print request');
+  
+  // Wrap the HTML fragment in a full document with thermal-printer CSS
+  const fullHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    /* Reset everything for thermal printer */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    @page {
+      size: 48mm auto;
+      margin: 0;
+    }
+    html, body {
+      width: 48mm;
+      max-width: 48mm;
+      margin: 0;
+      padding: 0;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 11px;
+      color: #000;
+      background: #fff;
+      -webkit-print-color-adjust: exact;
+      overflow-x: hidden;
+    }
+    body {
+      padding: 1mm;
+    }
+    div, h2, span, strong, b {
+      color: #000 !important;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      max-width: 100%;
+    }
+  </style>
+</head>
+<body>
+  ${htmlContent}
+</body>
+</html>`;
+
+  // Create a hidden window for printing
+  let printWindow = new BrowserWindow({ 
+    show: false,
+    width: 190,
+    height: 600,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true
+    }
+  });
+
+  printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(fullHtml)}`);
+
+  printWindow.webContents.on('did-finish-load', async () => {
+    try {
+      const printers = await printWindow.webContents.getPrintersAsync();
+      const defaultPrinter = printers.find(p => p.isDefault);
+      const printOptions = {
+        silent: true,
+        printBackground: true,
+        margins: {
+          marginType: 'none'
+        },
+        pageSize: {
+          width: 48000,   // 48mm printable area for 58mm thermal printer
+          height: 200000  // 200mm – will auto-cut or scroll
+        }
+      };
+      
+      if (defaultPrinter) {
+        printOptions.deviceName = defaultPrinter.name;
+        console.log(`[electron] Auto-detected default printer: ${defaultPrinter.name}`);
+      } else {
+        console.log('[electron] No default printer detected, using system configuration.');
+      }
+
+      // Small delay to let the renderer fully paint before printing
+      setTimeout(() => {
+        printWindow.webContents.print(printOptions, (success, failureReason) => {
+          if (!success) {
+            console.error('[electron] Silent print failed:', failureReason);
+          } else {
+            console.log('[electron] Silent print succeeded');
+          }
+          
+          // Clean up the window after printing is done
+          if (!printWindow.isDestroyed()) {
+            printWindow.close();
+          }
+        });
+      }, 500);
+    } catch (err) {
+      console.error('[electron] Error detecting printers:', err);
+      if (printWindow && !printWindow.isDestroyed()) {
+        printWindow.close();
+      }
+    }
+  });
 });
 

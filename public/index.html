@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="css/table-styles.css?v=1">
   <link rel="stylesheet" href="css/checkin-styles.css?v=2">
   <link rel="stylesheet" href="css/home-3d.css?v=1">
+  <link rel="stylesheet" href="css/renew-styles.css?v=1">
   <style>
     :root {
       --primary-gradient: linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%);
@@ -379,6 +380,28 @@
           <div class="feature-label">My Account</div>
           <div class="feature-desc">Manage loans & fines</div>
         </div>
+        <div id="btn-renew" class="feature-button">
+          <span class="feature-icon">🔄</span>
+          <div class="feature-label">Renew</div>
+          <div class="feature-desc">Extend your loan period</div>
+        </div>
+
+      </div>
+    </div>
+
+
+
+    <!-- My Account View -->
+    <div id="view-account" class="view">
+      <div class="form-container account-container">
+        <h1 class="form-title">My Account</h1>
+        <form id="account-form">
+          <div class="form-group">
+            <label for="account-card" class="form-label">Patron Card Number</label>
+            <input type="text" id="account-card" class="form-input" placeholder="Enter patron card number" required
+              autocomplete="off">
+          </div>
+
         <div id="btn-search" class="feature-button">
           <span class="feature-icon">🔍</span>
           <div class="feature-label">Search Catalog</div>
@@ -402,6 +425,9 @@
             <button type="submit" class="btn btn-primary">Search</button>
           </div>
         </form>
+
+        <div id="account-results" class="account-results" style="display: none;"></div>
+      </div>
         <div id="search-results" class="account-results" style="display: none;"></div>
       </div>
     </div>
@@ -499,6 +525,102 @@
         <div class="co-loading-dots">
           <span></span><span></span><span></span>
         </div>
+      <!-- Login Screen -->
+      <div id="account-login-screen" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 2rem;">
+        <div style="background: white; border-radius: 1rem; box-shadow: 0 20px 60px rgba(0,0,0,0.12); padding: 2.5rem 3rem; max-width: 480px; width: 100%; text-align: center;">
+          <h1 style="font-size: 1.8rem; font-weight: 800; color: #1e293b; margin: 0 0 0.25rem 0;">👤 My Account</h1>
+          <p style="font-size: 1.05rem; color: #64748b; margin: 0 0 2rem 0;">Scan your Library Card to login</p>
+
+          <!-- Card-Tap Illustration -->
+          <div style="margin: 0 auto 1.5rem auto; max-width: 320px;">
+            <img src="card-tap.svg" alt="Tap your card on the reader" style="width: 100%; height: auto;" />
+          </div>
+
+          <!-- Pulsing Status -->
+          <div id="account-reader-status" style="font-size: 1rem; color: #3b82f6; font-weight: 600; animation: pulse-text 2s ease-in-out infinite;">
+            Waiting for card… Place card on reader
+          </div>
+
+          <!-- Error (hidden by default) -->
+          <div id="account-reader-error" style="display: none; font-size: 1rem; color: #ef4444; font-weight: 700; margin-top: 0.75rem;">
+            ❌ Invalid Card
+          </div>
+
+          <!-- Hidden HID input (keyboard wedge) -->
+          <input type="text" id="account-hid-input" autocomplete="off" style="position: absolute; left: -9999px; opacity: 0;" />
+        </div>
+
+        <div style="margin-top: 1.5rem;">
+          <button type="button" class="btn btn-secondary btn-cancel" style="padding: 0.6rem 2rem; border-radius: 12px; font-size: 1rem;">← Home</button>
+        </div>
+      </div>
+
+      <!-- Dashboard (shown after login) -->
+      <div id="account-dashboard" style="display: none; padding: 2rem; max-width: 600px; margin: 0 auto;">
+        <div id="account-results" class="account-results" style="display: none;"></div>
+        <div style="margin-top: 1rem; text-align: left;">
+          <button type="button" class="btn btn-secondary btn-cancel" style="padding: 0.6rem 2rem; border-radius: 12px;">← Home</button>
+        </div>
+      </div>
+
+      <style>
+        @keyframes pulse-text {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+      </style>
+    </div>
+
+    <!-- Check-Out View -->
+    <div id="view-checkout" class="view">
+      <div class="form-container" style="max-width: 600px; padding: 2rem;">
+        <h1 class="form-title"
+          style="margin-bottom: 2rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+          📕 Check-Out
+        </h1>
+        <form id="checkout-form" onsubmit="event.preventDefault(); window.kioskApp?.handleConfirmCheckout?.();">
+          <div class="form-group" style="text-align: left;">
+            <label for="patron-card" class="form-label"
+              style="font-weight: 500; font-size: 0.95rem; color: #475569; margin-bottom: 0.5rem;">Patron Card
+              Number</label>
+            <input type="text" id="patron-card" class="form-input" placeholder="" autocomplete="off"
+              style="border: 1px solid #38bdf8; border-radius: 8px; font-size: 1rem; padding: 0.75rem 1rem;">
+            <div id="patron-rfid-status"
+              style="margin-top:0.75rem;padding:0.7rem 0.9rem;border-radius:8px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#b91c1c;font-size:0.9rem;font-weight:500;">
+              Patron RFID reader was not selected.
+            </div>
+            <div style="font-size: 0.85rem; color: #64748b; margin-top: 0.5rem; margin-left: 0.1rem;">Demo: Try 11111,
+              22222, or 33333</div>
+          </div>
+
+          <div class="scanning-panel"
+            style="background: rgba(241,245,249,0.5); border: 1px solid #cbd5e1; border-radius: 12px; padding: 1.25rem 1rem; margin-bottom: 1.5rem; text-align: left;">
+            <div
+              style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; font-weight: 500; color: #334155; font-size: 0.95rem;">
+              <span
+                style="width: 10px; height: 10px; background: #10b981; border-radius: 50%; display: inline-block; box-shadow: 0 0 5px rgba(16,185,129,0.5);"></span>
+              <span>Scanning — place books on the RFID reader</span>
+            </div>
+
+            <div id="checkout-scanned-items"
+              style="display: flex; flex-direction: column; gap: 0.75rem; max-height: 250px; overflow-y: auto;">
+              <!-- Items will be added here -->
+            </div>
+          </div>
+
+          <div class="form-actions" style="display: flex; gap: 1rem; justify-content: space-between; margin-top: 2rem;">
+            <button type="button" class="btn btn-secondary btn-cancel"
+              style="border-radius: 20px; padding: 0.75rem 2.5rem; background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; font-weight: 600; font-size: 1rem; cursor: pointer; transition: background 0.2s;">
+              Cancel
+            </button>
+            <button type="button" id="btn-confirm-checkout" class="btn btn-primary"
+              style="flex: 1; border-radius: 12px; padding: 0.75rem 2rem; background: #0ea5e9; border: none; display: flex; align-items: center; justify-content: center; gap: 0.5rem; font-weight: 600; font-size: 1rem; cursor: pointer;"
+              disabled>
+              ✓ Confirm Checkout <span id="checkout-item-count"
+                style="background: rgba(255,255,255,0.25); border-radius: 50%; width: 24px; height: 24px; display: inline-flex; justify-content: center; align-items: center; font-size: 0.85rem;">0</span>
+            </button>
+          </div>
+        </form>
       </div>
     </div>
 
@@ -569,6 +691,8 @@
             <button type="button" id="btn-done-checkin" class="btn btn-secondary" style="flex: none;">✓ Done</button>
           </div>
         </div>
+
+
       </div>
     </div>
 
@@ -576,6 +700,8 @@
     <div id="view-thankyou" class="view">
       <div class="thankyou-container">
         <div class="book-3d-scene">
+        <!-- Checkout Animation -->
+        <div id="thankyou-anim-checkout" class="book-3d-scene">
           <div class="book-3d">
             <div class="book-cover">
               <div class="book-spine"></div>
@@ -587,12 +713,207 @@
         <h1 class="thankyou-title">Success!</h1>
         <p class="thankyou-message">
           You checked in <span id="session-count" class="count-badge">0</span> items.
+
+        <!-- Checkin Animation / Instruction -->
+        <div id="thankyou-anim-checkin"
+          style="display: none; margin-bottom: 2rem; display: flex; flex-direction: column; align-items: center;">
+          <img src="shelf.svg" alt="Put book on shelf"
+            style="max-width: 100%; height: auto; max-height: 250px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);" />
+        </div>
+
+        <h1 class="thankyou-title">Success!</h1>
+        <p class="thankyou-message">
+          You <span id="thankyou-action-text">checked in</span> <span id="session-count" class="count-badge">0</span>
+          items.
         </p>
         <div class="quote-container">
           <p id="thankyou-quote" class="quote-text">“Reading is dreaming with open eyes.”</p>
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- ══ RENEW MODULE: 5-STEP FLOW ══════════════════════════════════════ -->
+
+  <!-- Step 1: Patron Scan Screen -->
+  <div id="view-renew-scan" class="view">
+    <div class="renew-scan-wrapper">
+      <div class="renew-header-bar">
+        <button type="button" class="renew-home-btn btn-cancel">← Home</button>
+        <h1 class="renew-page-title">🔄 Renew Items</h1>
+      </div>
+      <div class="renew-scan-card">
+        <div class="renew-card-anim">
+          <div class="renew-card-pulse"></div>
+          <div class="renew-card-icon">💳</div>
+        </div>
+        <p class="renew-scan-instruction">Place your library card on the reader</p>
+        <div id="renew-patron-status" class="renew-rfid-status">
+          Waiting for patron RFID reader…
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2: Connecting Spinner -->
+  <div id="view-renew-connecting" class="view">
+    <div class="renew-connecting-wrapper">
+      <div class="renew-spinner-ring"></div>
+      <p class="renew-connecting-text">Connecting to your account…</p>
+    </div>
+  </div>
+
+  <!-- Step 3: Items Out (renewable + not-renewable sections) -->
+  <div id="view-renew-items" class="view">
+    <div class="renew-items-wrapper">
+      <div class="renew-header-bar">
+        <button type="button" id="renew-items-back" class="renew-home-btn">← Back</button>
+        <div id="renew-patron-chip" class="renew-patron-chip">👤 —</div>
+      </div>
+      <h1 class="renew-page-title" style="margin-bottom:1.25rem;">Items Out</h1>
+
+      <!-- Section A: Renewable Items -->
+      <div class="renew-section" id="renew-section-renewable">
+        <div class="renew-section-header">
+          <span class="renew-section-label renew-section-label--green">✅ Renewable Items</span>
+          <div class="renew-select-controls">
+            <button type="button" id="renew-select-all" class="renew-ctrl-btn">Select All</button>
+            <button type="button" id="renew-clear-all"  class="renew-ctrl-btn">Clear</button>
+          </div>
+        </div>
+        <div id="renew-renewable-list" class="renew-item-list"></div>
+        <div id="renew-no-renewable" class="renew-empty-msg" style="display:none;">
+          No items are currently eligible for renewal.
+        </div>
+      </div>
+
+      <!-- Section B: Not Renewable Items (collapsible) -->
+      <div class="renew-section" id="renew-section-nonrenewable" style="display:none;">
+        <button type="button" id="renew-nonrenewable-toggle" class="renew-section-toggle">
+          <span class="renew-section-label renew-section-label--red">🚫 Not Renewable</span>
+          <span id="renew-nonrenewable-count" class="renew-count-badge">0</span>
+          <span id="renew-toggle-arrow" class="renew-toggle-arrow">▲</span>
+        </button>
+        <div id="renew-nonrenewable-list" class="renew-item-list renew-nonrenewable-list"></div>
+      </div>
+
+      <!-- Footer: Renew Selected button -->
+      <div class="renew-items-footer">
+        <button type="button" id="btn-renew-selected" class="renew-btn-primary">🔄 Renew Selected</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 5: Results Screen -->
+  <div id="view-renew-results" class="view">
+    <div class="renew-results-wrapper">
+      <h1 class="renew-results-heading">Renewal Results</h1>
+      <div id="renew-results-list" class="renew-results-list"></div>
+      <div class="renew-results-footer">
+        <button type="button" id="btn-renew-account"  class="renew-btn-secondary">👤 Account</button>
+        <button type="button" id="btn-renew-finished" class="renew-btn-primary">Finished →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Receipt Options -->
+  <div id="view-renew-receipt" class="view">
+    <!-- Outer: QR panel LEFT + existing receipt options RIGHT -->
+    <div class="renew-receipt-outer">
+
+      <!-- ══ QR RECEIPT PANEL (new, Renew-only) ══════════════════════ -->
+      <div class="qr-receipt-panel" id="qr-receipt-panel">
+        <span class="qr-panel-title">📱 Mobile Receipt</span>
+
+        <!-- State: Idle — big CTA -->
+        <div id="qr-state-idle">
+          <div class="qr-idle-icon">&#x1F4F1;</div>
+          <button type="button" class="qr-cta-btn" id="btn-qr-generate">
+            &#x1F4F7;&nbsp; Click to QR Scan
+          </button>
+        </div>
+
+        <!-- State: Loading -->
+        <div id="qr-state-loading" style="display:none;">
+          <div class="qr-loading-ring"></div>
+          <span class="qr-loading-text">Generating receipt…</span>
+        </div>
+
+        <!-- State: Active — show QR + countdown -->
+        <div id="qr-state-active" style="display:none;">
+          <div class="qr-code-box">
+            <div id="qr-code-display"></div>
+          </div>
+
+          <!-- Animated countdown ring -->
+          <div class="qr-countdown-wrap">
+            <svg class="qr-countdown-svg" width="60" height="60" viewBox="0 0 100 100">
+              <!-- Track -->
+              <circle cx="50" cy="50" r="44"
+                fill="none" stroke="rgba(124,58,237,0.12)" stroke-width="8"/>
+              <!-- Progress arc -->
+              <circle id="qr-countdown-circle" cx="50" cy="50" r="44"
+                fill="none" stroke="#7c3aed" stroke-width="8"
+                stroke-dasharray="276.46" stroke-dashoffset="0"/>
+            </svg>
+            <span class="qr-countdown-label" id="qr-countdown-label">180s</span>
+          </div>
+
+          <p class="qr-scan-hint">Scan with your phone camera<br>to download PDF receipt</p>
+
+          <!-- Wi-Fi hint (shown only when local URL is used) -->
+          <div class="qr-wifi-hint" id="qr-wifi-hint" style="display:none;">
+            &#9888;&#xFE0F; If QR doesn't open,<br>connect to library Wi&#8209;Fi.
+          </div>
+        </div>
+
+        <!-- State: Success — phone downloaded the PDF -->
+        <div id="qr-state-success" style="display:none;">
+          <div class="qr-success-icon">&#x2713;</div>
+          <p class="qr-success-text">Receipt sent successfully.<br>Thank you!</p>
+        </div>
+
+        <!-- State: Expired -->
+        <div id="qr-state-expired" style="display:none;">
+          <div class="qr-expired-icon">&#x23F1;&#xFE0F;</div>
+          <p class="qr-expired-text">QR expired.<br>Please click again.</p>
+          <button type="button" class="qr-retry-btn" id="btn-qr-retry">
+            &#x1F504;&nbsp;Try Again
+          </button>
+        </div>
+      </div>
+      <!-- ══ END QR RECEIPT PANEL ═══════════════════════════════════ -->
+
+      <!-- Existing receipt options — unchanged -->
+      <div class="renew-receipt-wrapper">
+        <button type="button" id="receipt-btn-back" class="renew-receipt-back-btn">&#8592; Back to Results</button>
+        <h1 class="renew-page-title">Receipt Options</h1>
+        <p class="renew-receipt-subtitle">How would you like your renewal receipt?</p>
+        <div class="renew-receipt-grid">
+          <button type="button" class="renew-receipt-choice" id="receipt-btn-print" data-receipt="print">
+            <span class="receipt-choice-icon">🖨️</span>
+            <span class="receipt-choice-label">Print Receipt</span>
+          </button>
+          <button type="button" class="renew-receipt-choice" id="receipt-btn-email" data-receipt="email">
+            <span class="receipt-choice-icon">✉️</span>
+            <span class="receipt-choice-label">Email Receipt</span>
+          </button>
+          <button type="button" class="renew-receipt-choice" id="receipt-btn-both" data-receipt="both">
+            <span class="receipt-choice-icon">📋</span>
+            <span class="receipt-choice-label">Print &amp; Email</span>
+          </button>
+          <button type="button" class="renew-receipt-choice" id="receipt-btn-none" data-receipt="none">
+            <span class="receipt-choice-icon">🚫</span>
+            <span class="receipt-choice-label">No Receipt</span>
+          </button>
+        </div>
+        <div id="renew-receipt-confirm" class="renew-receipt-confirm" style="display:none;">
+          <div class="renew-receipt-confirm-icon">&#10003;</div>
+          <div id="renew-receipt-confirm-text">Done!</div>
+        </div>
+      </div>
+
+    </div><!-- end .renew-receipt-outer -->
   </div>
 
   <!-- Check-In Success View -->
@@ -610,6 +931,43 @@
   <button type="button" id="btn-co-finish-overlay" style="display:none;">
     ✓ Finish Checkout
   </button>
+  <!-- Check-In Success View -->
+  <div id="view-checkin-success" class="view">
+    <div class="success-container"
+      style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; text-align: center; gap: 1.5rem; padding: 2rem;">
+      <h1 style="color: #10b981; font-size: 3rem; font-weight: 800; margin-bottom: 0.5rem; letter-spacing: -0.02em;">✅
+        Book Checked In Successfully!</h1>
+      <p style="font-size: 1.4rem; color: #475569; margin-bottom: 1rem; max-width: 600px;">📚 Please arrange the book or
+        put the book on the shelf.</p>
+
+      <div
+        style="background: white; border-radius: 24px; padding: 2rem; box-shadow: 0 15px 35px rgba(0,0,0,0.05); margin-bottom: 1rem; width: 100%; max-width: 500px; display: flex; justify-content: center; align-items: center;">
+        <img src="shelf.svg" alt="Library Shelf" style="height: 250px; width: 100%; object-fit: contain;" />
+      </div>
+
+      <p style="font-size: 1.1rem; color: #64748b; font-style: italic; margin-bottom: 2rem;">Thank you for helping keep
+        the library organized.</p>
+
+      <button type="button" id="btn-final-done" class="btn btn-primary"
+        style="background: #10b981; border: none; padding: 1.2rem 4rem; border-radius: 50px; font-size: 1.2rem; font-weight: 700; box-shadow: 0 10px 20px rgba(16,185,129,0.3); transition: transform 0.2s;">Done</button>
+    </div>
+  </div>
+
+  <!-- Hold Modal -->
+  <div id="hold-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 2rem; border-radius: 16px; max-width: 420px; width: 90%; box-shadow: 0 20px 40px rgba(0,0,0,0.2); margin: auto; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+      <h3 style="margin-top: 0; font-size: 1.3rem; color: #1e293b;">📌 Place Hold / Reserve</h3>
+      <p id="hold-book-title" style="font-weight: 600; color: #334155; margin-bottom: 1rem;"></p>
+      <div style="margin-bottom: 1rem;">
+        <label style="font-size: 0.9rem; color: #475569; font-weight: 500;">Patron Card Number</label>
+        <input type="text" id="hold-patron-input" autocomplete="off" placeholder="Enter your card number" style="width: 100%; padding: 0.75rem 1rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 1rem; margin-top: 0.5rem; box-sizing: border-box;" />
+      </div>
+      <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+        <button type="button" id="btn-cancel-hold" class="btn btn-secondary" style="padding: 0.6rem 1.5rem; border-radius: 8px;">Cancel</button>
+        <button type="button" id="btn-confirm-hold" class="btn btn-primary" style="padding: 0.6rem 1.5rem; border-radius: 8px; background: #3b82f6; border: none; font-weight: 600;">Place Hold</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Powered By Footer -->
   <div class="powered-by-footer">
@@ -623,6 +981,8 @@
   <script src="js/app.js"></script>
   <script src="js/patron-rfid-service.js"></script>
   <script src="js/rfid-service.js"></script>
+  <script src="js/qrcode.min.js"></script>
+  <script src="js/qr-receipt.js"></script>
 </body>
 
 </html>

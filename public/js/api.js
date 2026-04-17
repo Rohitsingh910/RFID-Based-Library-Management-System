@@ -434,6 +434,217 @@ class KohaAPI {
     }
 
     /**
+     * Renew an item for a patron via Koha REST (backend mode only)
+     * @param {string} patronCardNumber
+     * @param {string} itemBarcode
+     * @returns {Promise<Object>}
+     */
+    async renew(patronCardNumber, itemBarcode) {
+        if (this.mode === 'demo') {
+            return this._mockRenew(patronCardNumber, itemBarcode);
+        }
+        return this._backendRenew(patronCardNumber, itemBarcode);
+    }
+
+    async _mockRenew(patronCardNumber, itemBarcode) {
+        await this._simulateDelay();
+        const patron = this.mockDB.patrons.find(p => p.cardNumber === patronCardNumber);
+        if (!patron) throw new Error('Patron not found. Please check the card number.');
+        const checkout = this.mockDB.checkouts.find(c => c.itemBarcode === itemBarcode && c.patronCardNumber === patronCardNumber);
+        if (!checkout) throw new Error('This item is not currently checked out to this patron.');
+        const newDue = new Date();
+        newDue.setDate(newDue.getDate() + 14);
+        checkout.dueDate = newDue.toISOString();
+        return {
+            success: true,
+            message: 'Item renewed successfully.',
+            data: {
+                patronCardNumber,
+                patronName: patron.name,
+                itemBarcode,
+                itemTitle: checkout.itemTitle || itemBarcode,
+                newDueDate: checkout.dueDate
+            }
+        };
+    }
+
+    async _backendRenew(patronCardNumber, itemBarcode) {
+        try {
+            const response = await fetch(`${this.config.backend.baseUrl}/renew`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ patronCardNumber, itemBarcode })
+            });
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.message || 'Renewal failed');
+            }
+            return result;
+        } catch (error) {
+            throw new Error(error.message || 'Renewal failed');
+        }
+    }
+
+    /**
+     * Renew — fetch items out for a patron with renewable/not-renewable classification.
+     * @param {string} patronCardNumber
+     * @returns {Promise<Object>} { success, data: { patronName, patronCardNumber, items[] } }
+     */
+    async getItemsForRenew(patronCardNumber) {
+        if (this.mode === 'demo') {
+            return this._mockGetItemsForRenew(patronCardNumber);
+        }
+        return this._backendGetItemsForRenew(patronCardNumber);
+    }
+
+    async _mockGetItemsForRenew(patronCardNumber) {
+        await this._simulateDelay();
+        const patron = this.mockDB.patrons.find(p => p.cardNumber === patronCardNumber);
+        if (!patron) throw new Error('Patron not found. Please check the card number.');
+        const loans = this.mockDB.checkouts.filter(c => c.patronCardNumber === patronCardNumber);
+        const items = loans.map((c, i) => ({
+            checkoutId: 1000 + i,
+            itemId: i + 1,
+            itemBarcode: c.itemBarcode,
+            itemTitle: c.itemTitle || c.itemBarcode,
+            dueDate: c.dueDate ? new Date(c.dueDate).toISOString().slice(0, 10) : '',
+            renewable: i % 2 === 0 ? true : false,
+            notRenewableReason: i % 2 !== 0 ? 'Maximum renewals reached' : '',
+            renewalsRemaining: i % 2 === 0 ? 2 : 0
+        }));
+        // Add demo items if empty so the UI has data to show
+        if (items.length === 0) {
+            items.push(
+                { checkoutId: 1001, itemId: 1, itemBarcode: 'DEMO001', itemTitle: 'Introduction to Programming', dueDate: '2026-04-25', renewable: true,  notRenewableReason: '',                         renewalsRemaining: 2 },
+                { checkoutId: 1002, itemId: 2, itemBarcode: 'DEMO002', itemTitle: 'Advanced Algorithms',         dueDate: '2026-03-10', renewable: false, notRenewableReason: 'Maximum renewals reached', renewalsRemaining: 0 },
+                { checkoutId: 1003, itemId: 3, itemBarcode: 'DEMO003', itemTitle: 'Database Design',             dueDate: '2026-04-30', renewable: null,  notRenewableReason: '',                         renewalsRemaining: null }
+            );
+        }
+        return { success: true, data: { patronName: patron.name, patronCardNumber, items } };
+    }
+
+    async _backendGetItemsForRenew(patronCardNumber) {
+        try {
+            const response = await fetch(`${this.config.backend.baseUrl}/renew/items?cardnumber=${encodeURIComponent(patronCardNumber)}`);
+            const result = await response.json();
+            if (!result.success) throw new Error(result.message || 'Unable to fetch items');
+            return result;
+        } catch (error) {
+            throw new Error(error.message || 'Unable to fetch items');
+        }
+    }
+
+    /**
+     * Renew — submit a batch of barcodes for renewal.
+     * @param {string} patronCardNumber
+     * @param {string[]} barcodes
+     * @returns {Promise<Object>} { success, results: [{ barcode, ok, itemTitle, newDueDate, message }] }
+     */
+    async renewBatch(patronCardNumber, barcodes) {
+        if (this.mode === 'demo') {
+            return this._mockRenewBatch(patronCardNumber, barcodes);
+        }
+        return this._backendRenewBatch(patronCardNumber, barcodes);
+    }
+
+    async _mockRenewBatch(patronCardNumber, barcodes) {
+        await this._simulateDelay();
+        const results = barcodes.map((barcode, i) => {
+            const ok = i % 3 !== 2; // every 3rd item fails
+            const newDue = new Date();
+            newDue.setDate(newDue.getDate() + 14);
+            return {
+                barcode,
+                ok,
+                itemTitle: `Item ${barcode}`,
+                newDueDate: ok ? newDue.toISOString().slice(0, 10) : '',
+                message: ok ? 'Renewed successfully' : 'Maximum renewal limit reached for this item.'
+            };
+        });
+        return { success: true, results };
+    }
+
+    async _backendRenewBatch(patronCardNumber, barcodes) {
+        try {
+            const response = await fetch(`${this.config.backend.baseUrl}/renew/batch`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ patronCardNumber, barcodes })
+            });
+            const result = await response.json();
+            if (!result.success) throw new Error(result.message || 'Batch renewal failed');
+            return result;
+        } catch (error) {
+            throw new Error(error.message || 'Batch renewal failed');
+        }
+    }
+
+    // ─── QR Receipt (Renew Only) ──────────────────────────────────────────────
+
+    /**
+     * Create a QR receipt token + PDF link for the Renew flow.
+     * NEW isolated endpoint — not used by Check-In / Check-Out / Account.
+     * @param {Object} transactionData - lastTransaction from Renew flow
+     * @returns {Promise<{ token: string, url: string, expiresAt: string, localOnly: boolean }>}
+     */
+    async createQrReceipt(transactionData) {
+        try {
+            const response = await fetch('/api/receipt/qr', {
+                method : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body   : JSON.stringify({ transactionData })
+            });
+            const result = await response.json();
+            if (!result.token) throw new Error(result.message || 'Failed to create QR receipt');
+            return result;
+        } catch (error) {
+            throw new Error(error.message || 'QR receipt creation failed');
+        }
+    }
+
+    /**
+     * Poll QR receipt download status.
+     * NEW isolated endpoint — not used by Check-In / Check-Out / Account.
+     * @param {string} token
+     * @returns {Promise<{ downloaded: boolean, remainingSeconds: number, expired: boolean }>}
+     */
+    async getQrReceiptStatus(token) {
+        try {
+            const response = await fetch(`/api/receipt/qr-status/${encodeURIComponent(token)}`);
+            return await response.json();
+        } catch (error) {
+            throw new Error(error.message || 'QR status check failed');
+        }
+    }
+
+    // ─── End QR Receipt ───────────────────────────────────────────────────────
+
+    async placeHold(patronCardNumber, barcode) {
+        if (this.mode === 'demo') {
+            await this._simulateDelay();
+            return { success: true, message: 'Hold placed successfully (Demo Mode)' };
+        }
+        
+        try {
+            const response = await fetch(`${this.config.backend.baseUrl}/hold`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ patronCardNumber, barcode })
+            });
+
+            const result = await response.json();
+
+            if (!result.success) {
+                throw new Error(result.message || 'Failed to place hold');
+            }
+
+            return result;
+        } catch (error) {
+            throw new Error(`Backend Error: ${error.message}`);
+        }
+    }
+
+    /**
      * Get current mode
      */
     getMode() {

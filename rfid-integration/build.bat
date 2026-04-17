@@ -24,18 +24,23 @@ call "%VSCMD%" >nul 2>&1
 set "SRC_DIR=%~dp0src"
 set "BUILD_DIR=%~dp0build"
 set "VENDOR_DIR=%~dp0vendor"
+set "SDK_ROOT=C:\Users\NIELIT\Desktop\New folder1\FEIG.ID.SDK.Gen3.Windows.Cpp-v6.11.0\x86.vc142"
 
 if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 
 echo Compiling Mr101RfidBridge.cpp...
 cl.exe /EHsc /MD /std:c++17 /O2 ^
     /I"%VENDOR_DIR%\include" ^
+    /I"%SDK_ROOT%\include" ^
+    /I"%SDK_ROOT%\include\fedm" ^
+    /I"%~dp0vendor\include" ^
     "%SRC_DIR%\Mr101RfidBridge.cpp" ^
     /link /OUT:"%BUILD_DIR%\Mr101RfidBridge.exe" ^
     user32.lib ws2_32.lib advapi32.lib > "%BUILD_DIR%\compile.log" 2>&1
 
 if %ERRORLEVEL% neq 0 (
     echo Compilation failed! See rfid-integration/build/compile.log for details.
+    echo Compilation failed! See build/compile.log for details.
     type "%BUILD_DIR%\compile.log"
     exit /b %ERRORLEVEL%
 )
@@ -43,4 +48,6 @@ if %ERRORLEVEL% neq 0 (
 echo Compilation successful.
 echo Copying dependencies from vendor/bin...
 xcopy /Y "%VENDOR_DIR%\bin\*.dll" "%BUILD_DIR%\"
+echo Copying dependencies...
+xcopy /Y "%SDK_ROOT%\bin\release\*.dll" "%BUILD_DIR%\"
 exit /b 0

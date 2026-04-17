@@ -2,6 +2,12 @@ require('dotenv').config();
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const { spawn } = require('child_process');
+const { sipCheckin } = require('./sip-client');
+const crypto = require('crypto');
+let PDFDocument;
+try { PDFDocument = require('pdfkit'); } catch (_) { PDFDocument = null; }
 const { spawn } = require('child_process');
 const { sipCheckin } = require('./sip-client');
 const uuidv4 = () => Math.random().toString(36).substring(2, 11).toUpperCase(); 
@@ -698,6 +704,7 @@ async function ensureRfidBridgeStarted() {
       RFID_STATE.lastError = compileError.message;
       throw compileError;
     }
+    await compileRfidBridge();
 
     RFID_STATE.status = 'starting';
     logger.info('RFID', `Starting bridge executable: ${RFID_EXECUTABLE}`);
@@ -721,6 +728,7 @@ async function ensureRfidBridgeStarted() {
           RFID_STATE.child = null;
       }
       child.exitTime = Date.now();
+      RFID_STATE.child = null;
       RFID_STATE.status = 'stopped';
       RFID_STATE.lastError = `RFID bridge exited (code=${code}, signal=${signal || 'none'})`;
       logger.warn('RFID', `RFID bridge stopped unexpectedly: ${RFID_STATE.lastError}`);
@@ -742,11 +750,15 @@ async function ensureRfidBridgeStarted() {
         stopRfidBridge();
         throw healthyError;
     }
+    await waitForBridgeReady();
+    logger.info('RFID', 'RFID bridge is running and healthy');
+    RFID_STATE.status = 'running';
   })()
     .catch((error) => {
       RFID_STATE.status = 'error';
       RFID_STATE.lastError = error.message;
       if (RFID_STATE.child) stopRfidBridge();
+      RFID_STATE.child = null;
       throw error;
     })
     .finally(() => {
@@ -1277,6 +1289,33 @@ async function getPatronAccountSummary(patronCardNumber) {
     };
   }));
 
+  let holds = [];
+  try {
+    const holdsPayload = await kohaRequest(`/holds?patron_id=${patron.patron_id}`);
+    const rawHolds = normalizeCollection(holdsPayload);
+    holds = await Promise.all(rawHolds.filter(h => !h.cancellation_date).map(async (h) => {
+      let title = `Item ${h.item_id || h.biblio_id}`;
+      if (h.biblio_id) {
+        try {
+          const bib = await kohaRequest(`/biblios/${h.biblio_id}`);
+          title = extractTitle(bib) || title;
+        } catch (_) {}
+      }
+      return {
+        holdId: h.hold_id,
+        biblioId: h.biblio_id,
+        itemId: h.item_id,
+        title,
+        queuePosition: h.priority || 1,
+        status: h.found === 'W' ? 'Ready for Pickup' : h.found === 'T' ? 'In Transit' : 'On Hold',
+        pickupDeadline: h.expirationdate || 'N/A',
+        pickupLibrary: h.pickup_library_id || ''
+      };
+    }));
+  } catch (holdError) {
+    logger.warn('Account', `Could not fetch holds: ${holdError.message}`);
+  }
+
   return {
     patronCardNumber,
     patronName: firstNonEmpty([
@@ -1285,6 +1324,8 @@ async function getPatronAccountSummary(patronCardNumber) {
     ]),
     fineAmount,
     loans
+    loans,
+    holds
   };
 }
 
@@ -1381,6 +1422,58 @@ async function handleAccount(req, res) {
       success: false,
       message: error.message || 'Unable to fetch account details'
     });
+  }
+}
+
+async function handlePlaceHold(req, res) {
+  const requestId = uuidv4();
+  try {
+    const body = await parseRequestBody(req);
+    const patronCardNumber = String(body.patronCardNumber || '').trim();
+    const barcode = String(body.barcode || '').trim();
+
+    if (!patronCardNumber || !barcode) {
+      sendJson(res, 400, { success: false, message: 'Card number and barcode are required' });
+      return;
+    }
+
+    logger.info('Hold', `[START] Placing hold for ${patronCardNumber} on ${barcode}`, { requestId });
+
+    // Find Patron
+    let patronsPayload = await kohaRequest(`/patrons?cardnumber=${encodeURIComponent(patronCardNumber)}`);
+    let patrons = normalizeCollection(patronsPayload);
+    let patron = findExactMatch(patrons, 'cardnumber', patronCardNumber);
+    if (!patron) {
+      patronsPayload = await kohaRequest(`/patrons?q=${encodeURIComponent(patronCardNumber)}`);
+      patrons = normalizeCollection(patronsPayload);
+      patron = patrons.find(p => String(p.cardnumber || '').trim() === patronCardNumber) || null;
+    }
+    if (!patron) {
+      sendJson(res, 404, { success: false, message: 'Patron not found' });
+      return;
+    }
+
+    // Find item
+    const itemsPayload = await kohaRequest(`/items?external_id=${encodeURIComponent(barcode)}`);
+    const items = normalizeCollection(itemsPayload);
+    const item = findExactMatch(items, 'external_id', barcode) || items[0];
+    if (!item) {
+      sendJson(res, 404, { success: false, message: 'Item not found' });
+      return;
+    }
+
+    const holdPayload = {
+      patron_id: patron.patron_id,
+      biblio_id: item.biblio_id,
+      pickup_library_id: KOHA_CONFIG.libraryId || 'CPL'
+    };
+
+    const response = await kohaPost('/holds', holdPayload);
+    logger.info('Hold', `[SUCCESS] Hold placed for ${patronCardNumber}`, { requestId, holdId: response.hold_id });
+    sendJson(res, 200, { success: true, message: 'Hold placed successfully', hold: response });
+  } catch (error) {
+    logger.error('Hold', `[FAIL] Failed to place hold: ${error.message}`, { requestId });
+    sendJson(res, 500, { success: false, message: error.message || 'Failed to place hold' });
   }
 }
 
@@ -1640,6 +1733,733 @@ async function handleCheckin(req, res) {
 }
 
 
+// ─── Renew Module ─────────────────────────────────────────────────────────────
+
+function parseKohaRenewalError(error) {
+  const raw = String(error?.message || error || '').trim();
+
+  // Try to parse JSON error body from Koha
+  let errorCode = '';
+  let errorMsg = '';
+  try {
+    const parsed = JSON.parse(raw);
+    errorCode = String(parsed.error || parsed.code || parsed.reason || '').toLowerCase();
+    errorMsg  = String(parsed.error || parsed.message || '').toLowerCase();
+  } catch (_) {
+    errorCode = raw.toLowerCase();
+    errorMsg  = raw.toLowerCase();
+  }
+
+  const combined = `${errorCode} ${errorMsg} ${raw.toLowerCase()}`;
+
+  if (/too_many|too many|max_renewals|maximum renewal/i.test(combined)) {
+    return 'Maximum renewal limit reached for this item.';
+  }
+  if (/on_hold|hold|reserved/i.test(combined)) {
+    return "This item can't be renewed because another patron has requested it.";
+  }
+  if (/not_renewable|not renewable/i.test(combined)) {
+    return 'This item is not eligible for renewal.';
+  }
+  if (/not_checked_out|not checked.?out/i.test(combined)) {
+    return 'This item is not currently checked out.';
+  }
+  if (/not_same_patron|wrong patron|different patron/i.test(combined)) {
+    return 'This item is not issued to this patron.';
+  }
+  if (/account_expired|patron expired|expired/i.test(combined)) {
+    return 'Patron account has expired. Please contact the library staff.';
+  }
+  if (/fine|overdue|fee/i.test(combined)) {
+    return 'Renewal blocked due to outstanding fines. Please contact staff.';
+  }
+  if (/auto_renew/i.test(combined)) {
+    return 'This item is set to auto-renew and cannot be renewed manually.';
+  }
+
+  return 'Renewal failed. Please contact staff.';
+}
+
+async function kohaRenewItem(checkoutId) {
+  // Koha REST API: POST /checkouts/{checkout_id}/renewal
+  const url = new URL(`${KOHA_CONFIG.baseUrl}/checkouts/${checkoutId}/renewal`);
+  const authHeader = 'Basic ' + Buffer.from(`${KOHA_CONFIG.username}:${KOHA_CONFIG.password}`).toString('base64');
+  const body = '{}';
+
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      {
+        hostname: url.hostname,
+        port: url.port || 80,
+        path: `${url.pathname}${url.search}`,
+        method: 'POST',
+        headers: {
+          Authorization: authHeader,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body)
+        }
+      },
+      (response) => {
+        let responseBody = '';
+        response.on('data', (chunk) => { responseBody += chunk.toString('utf8'); });
+        response.on('end', () => {
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            const err = new Error(responseBody || `Koha renewal failed (status ${response.statusCode})`);
+            err.statusCode = response.statusCode;
+            reject(err);
+            return;
+          }
+          try {
+            resolve(responseBody ? JSON.parse(responseBody) : {});
+          } catch (_) {
+            resolve({});
+          }
+        });
+      }
+    );
+    request.on('error', (e) => reject(new Error(`Koha renewal connection error: ${e.message}`)));
+    request.write(body);
+    request.end();
+  });
+}
+
+async function handleRenew(req, res) {
+  const requestId = uuidv4();
+  try {
+    const body = await parseRequestBody(req);
+    const patronCardNumber = String(body.patronCardNumber || '').trim();
+    const itemBarcode     = normalizeItemBarcode(body.itemBarcode);
+
+    logger.info('Renew', `[START] Renewal requested — Patron: ${patronCardNumber}, Item: ${itemBarcode}`, { requestId });
+
+    if (!patronCardNumber || !itemBarcode) {
+      sendJson(res, 400, { success: false, message: 'Patron card number and item barcode are required' });
+      return;
+    }
+
+    // 1. Look up patron
+    const patronsPayload = await kohaRequest(`/patrons?cardnumber=${encodeURIComponent(patronCardNumber)}`);
+    const patrons = normalizeCollection(patronsPayload);
+    const patron  = findExactMatch(patrons, 'cardnumber', patronCardNumber);
+    if (!patron) {
+      logger.warn('Renew', `Patron not found: ${patronCardNumber}`, { requestId });
+      sendJson(res, 404, { success: false, message: `No patron found with card number ${patronCardNumber}` });
+      return;
+    }
+    logger.info('Renew', `Patron identified: ${patron.firstname} ${patron.surname}`, { requestId, patronId: patron.patron_id });
+
+    // 2. Look up item
+    const itemsPayload = await kohaRequest(`/items?external_id=${encodeURIComponent(itemBarcode)}`);
+    const items = normalizeCollection(itemsPayload);
+    const item  = findExactMatch(items, 'external_id', itemBarcode);
+    if (!item) {
+      logger.warn('Renew', `Item not found: ${itemBarcode}`, { requestId });
+      sendJson(res, 404, { success: false, message: `No item found with barcode ${itemBarcode}` });
+      return;
+    }
+    const itemDetails = await getItemDetails(itemBarcode);
+
+    // 3. Find active checkout for this item
+    const activeCheckout = await getActiveCheckoutForItemId(item.item_id);
+    if (!activeCheckout) {
+      logger.warn('Renew', `No active checkout for item: ${itemBarcode}`, { requestId });
+      sendJson(res, 409, { success: false, message: 'This item is not currently checked out.' });
+      return;
+    }
+
+    // 4. Verify the checkout belongs to this patron
+    if (Number(activeCheckout.patron_id) !== Number(patron.patron_id)) {
+      logger.warn('Renew', `Item belongs to a different patron`, { requestId, itemPatronId: activeCheckout.patron_id, requestPatron: patron.patron_id });
+      sendJson(res, 403, { success: false, message: 'This item is not issued to this patron.' });
+      return;
+    }
+
+    // 5. Call Koha renewal API — policy is fully governed by Koha circulation rules
+    logger.info('Renew', `Requesting Koha renewal for checkout_id: ${activeCheckout.checkout_id}`, { requestId });
+    let renewalResult;
+    try {
+      renewalResult = await kohaRenewItem(activeCheckout.checkout_id);
+    } catch (kohaError) {
+      const friendlyMsg = parseKohaRenewalError(kohaError);
+      logger.warn('Renew', `Koha renewal denied: ${kohaError.message}`, { requestId });
+      sendJson(res, 422, { success: false, message: friendlyMsg });
+      return;
+    }
+
+    const newDueDate = firstNonEmpty([
+      renewalResult?.due_date,
+      renewalResult?.dueDate,
+      renewalResult?.date_due,
+      ''
+    ]);
+
+    logger.info('Renew', `[SUCCESS] Renewal completed — new due date: ${newDueDate}`, { requestId, itemBarcode, patronCardNumber });
+    sendJson(res, 200, {
+      success: true,
+      message: 'Item renewed successfully.',
+      data: {
+        patronCardNumber,
+        patronName: `${patron.firstname || ''} ${patron.surname || ''}`.trim(),
+        itemBarcode,
+        itemTitle: itemDetails.itemTitle,
+        newDueDate
+      }
+    });
+
+  } catch (error) {
+    logger.error('Renew', `[CRITICAL] Renewal failed: ${error.message}`, { requestId, stack: error.stack });
+    sendJson(res, 500, { success: false, message: error.message || 'Renewal failed' });
+  }
+}
+
+// ─── End Renew Module ──────────────────────────────────────────────────────────
+
+// ─── Renew Batch & Items-Out ─────────────────────────────────────────────────
+
+/**
+ * Converts a raw Koha non-renewable error code into a short patron-facing label.
+ * Does NOT hardcode policy — only translates known code strings to friendly text.
+ */
+function mapRenewalReasonToLabel(errorCode) {
+  const code = String(errorCode || '').toLowerCase();
+  if (/too_many|max_renewals|maximum/.test(code))      return 'Maximum renewals reached';
+  if (/on_hold|hold|reserved/.test(code))              return 'On hold for another patron';
+  if (/not_renewable/.test(code))                      return 'Item not renewable';
+  if (/not_checked_out/.test(code))                    return 'Item not checked out';
+  if (/not_same_patron/.test(code))                    return 'Account not eligible';
+  if (/account_expired|patron_expired|expired/.test(code)) return 'Account not eligible';
+  if (/fine|overdue/.test(code))                       return 'Account not eligible';
+  if (/auto_renew/.test(code))                         return 'Renewal not allowed yet';
+  if (/restricted|blocked/.test(code))                 return 'Account not eligible';
+  if (code)                                            return 'Item not renewable';
+  return 'Unknown restriction';
+}
+
+/**
+ * Shared patron lookup for the renew flow (with fallback search and RFID demo mapping).
+ * Does NOT modify any existing patron functions.
+ */
+async function getPatronForRenew(patronCardNumber) {
+  // Demo/RFID mapping — same as getPatronAccountSummary
+  if (patronCardNumber === 'E0040150111266FC') {
+    patronCardNumber = '1';
+  }
+
+  let patron = null;
+
+  try {
+    const payload = await kohaRequest(`/patrons?cardnumber=${encodeURIComponent(patronCardNumber)}`);
+    patron = findExactMatch(normalizeCollection(payload), 'cardnumber', patronCardNumber);
+  } catch (_) {}
+
+  if (!patron) {
+    try {
+      const payload = await kohaRequest(`/patrons?q=${encodeURIComponent(patronCardNumber)}`);
+      const patrons = normalizeCollection(payload);
+      patron = patrons.find((p) =>
+        String(p.cardnumber || '').trim().toUpperCase() === patronCardNumber.toUpperCase() ||
+        String(p.userid || '').trim().toUpperCase() === patronCardNumber.toUpperCase()
+      );
+    } catch (_) {}
+  }
+
+  return patron;
+}
+
+/**
+ * GET /api/renew/items?cardnumber=...
+ * Returns patron info + all active checkouts classified as renewable/not-renewable.
+ * Uses Koha's GET /checkouts/{id}/renewability if available (Koha 22.11+);
+ * silently falls back to marking items as renewable=null (unknown) if not.
+ */
+async function handleRenewItemsOut(req, res) {
+  const requestId = uuidv4();
+  try {
+    const reqUrl = new URL(req.url, `http://${req.headers.host}`);
+    const patronCardNumber = String(reqUrl.searchParams.get('cardnumber') || '').trim();
+
+    if (!patronCardNumber) {
+      sendJson(res, 400, { success: false, message: 'cardnumber is required' });
+      return;
+    }
+
+    logger.info('Renew', `[ITEMS OUT] Fetching items for patron: ${patronCardNumber}`, { requestId });
+
+    const patron = await getPatronForRenew(patronCardNumber);
+    if (!patron) {
+      sendJson(res, 404, { success: false, message: `No patron found with card number ${patronCardNumber}` });
+      return;
+    }
+
+    logger.info('Renew', `Patron found: ${patron.firstname} ${patron.surname}`, { requestId });
+
+    // Fetch all active checkouts for this patron
+    const checkoutsQuery = encodeURIComponent(JSON.stringify({ patron_id: patron.patron_id, checkin_date: null }));
+    const checkoutsPayload = await kohaRequest(`/checkouts?q=${checkoutsQuery}`);
+    const checkouts = normalizeCollection(checkoutsPayload)
+      .filter((c) => Number(c?.patron_id) === Number(patron.patron_id) && c?.checkin_date == null);
+
+    logger.info('Renew', `Found ${checkouts.length} active checkouts`, { requestId });
+
+    // Resolve item details + renewability precheck in parallel
+    const itemPromises = checkouts.map(async (checkout) => {
+      const itemId = checkout.item_id;
+      let itemTitle = '';
+      let itemBarcode = '';
+
+      try {
+        const details = await getItemDetailsById(itemId);
+        itemTitle = details.itemTitle || '';
+        itemBarcode = details.itemBarcode || '';
+      } catch (_) {}
+
+      itemBarcode = itemBarcode || firstNonEmpty([
+        checkout.external_id,
+        checkout.barcode,
+        itemId ? String(itemId) : ''
+      ]);
+      itemTitle = itemTitle || itemBarcode || `Item ${itemId}`;
+
+      const dueDate = firstNonEmpty([checkout.due_date, checkout.date_due, '']);
+
+      // Renewability precheck — uses Koha REST if available, else null = unknown
+      let renewable = null;         // null means unknown — UI should treat as renewable
+      let notRenewableReason = '';
+      let renewalsRemaining = null;
+
+      try {
+        const renewCheck = await kohaRequest(`/checkouts/${checkout.checkout_id}/renewability`);
+        renewable = renewCheck.renewable === true || String(renewCheck.renewable).toLowerCase() === 'true';
+        if (!renewable) {
+          notRenewableReason = mapRenewalReasonToLabel(renewCheck.error || renewCheck.reason || '');
+        }
+        // Renewals remaining — only if both fields are reliably numeric from Koha
+        if (typeof renewCheck.renewals_allowed === 'number' && typeof renewCheck.renewals_count === 'number') {
+          renewalsRemaining = Math.max(0, renewCheck.renewals_allowed - renewCheck.renewals_count);
+        }
+      } catch (precheckError) {
+        // Endpoint missing (Koha < 22.11) or transient failure — fall back to unknown
+        renewable = null;
+        logger.warn('Renew', `Renewability precheck skipped for checkout ${checkout.checkout_id}: ${precheckError.message}`, { requestId });
+      }
+
+      return { checkoutId: checkout.checkout_id, itemId, itemBarcode, itemTitle, dueDate, renewable, notRenewableReason, renewalsRemaining };
+    });
+
+    const items = await Promise.all(itemPromises);
+    logger.info('Renew', `[ITEMS OUT] Classified ${items.length} items`, { requestId });
+
+    sendJson(res, 200, {
+      success: true,
+      data: {
+        patronName: firstNonEmpty([`${patron.firstname || ''} ${patron.surname || ''}`.trim(), patron.cardnumber]),
+        patronCardNumber,
+        items
+      }
+    });
+  } catch (error) {
+    logger.error('Renew', `[ITEMS OUT FAIL] ${error.message}`, { requestId, stack: error.stack });
+    const statusCode = /No patron found/i.test(error.message) ? 404 : 500;
+    sendJson(res, statusCode, { success: false, message: error.message || 'Failed to fetch items' });
+  }
+}
+
+/**
+ * POST /api/renew/batch
+ * Body: { patronCardNumber, barcodes: ["BC001", "BC002"] }
+ * Renews each item sequentially against Koha; supports partial success.
+ * Each result: { barcode, ok, itemTitle, newDueDate, message }
+ */
+async function handleRenewBatch(req, res) {
+  const requestId = uuidv4();
+  try {
+    const body = await parseRequestBody(req);
+    const patronCardNumber = String(body.patronCardNumber || '').trim();
+    const barcodes = Array.isArray(body.barcodes)
+      ? body.barcodes.map((b) => String(b).trim()).filter(Boolean)
+      : [];
+
+    if (!patronCardNumber) {
+      sendJson(res, 400, { success: false, message: 'patronCardNumber is required' });
+      return;
+    }
+    if (barcodes.length === 0) {
+      sendJson(res, 400, { success: false, message: 'barcodes array is required and must not be empty' });
+      return;
+    }
+
+    logger.info('Renew', `[BATCH START] patron=${patronCardNumber}, count=${barcodes.length}`, { requestId });
+
+    const patron = await getPatronForRenew(patronCardNumber);
+    if (!patron) {
+      sendJson(res, 404, { success: false, message: `No patron found with card number ${patronCardNumber}` });
+      return;
+    }
+
+    // Process each barcode sequentially to avoid race conditions on the same patron
+    const results = [];
+    for (const barcode of barcodes) {
+      const result = { barcode, ok: false, itemTitle: barcode, message: '', newDueDate: '' };
+
+      try {
+        const itemsPayload = await kohaRequest(`/items?external_id=${encodeURIComponent(barcode)}`);
+        const item = findExactMatch(normalizeCollection(itemsPayload), 'external_id', barcode);
+
+        if (!item) {
+          result.message = 'Item not found.';
+          results.push(result);
+          continue;
+        }
+
+        try {
+          const details = await getItemDetails(barcode);
+          result.itemTitle = details.itemTitle || barcode;
+        } catch (_) {}
+
+        const activeCheckout = await getActiveCheckoutForItemId(item.item_id);
+        if (!activeCheckout) {
+          result.message = 'This item is not currently checked out.';
+          results.push(result);
+          continue;
+        }
+
+        if (Number(activeCheckout.patron_id) !== Number(patron.patron_id)) {
+          result.message = 'This item is not issued to this patron.';
+          results.push(result);
+          continue;
+        }
+
+        try {
+          const renewalResult = await kohaRenewItem(activeCheckout.checkout_id);
+          result.ok = true;
+          result.message = 'Renewed successfully';
+          result.newDueDate = firstNonEmpty([renewalResult?.due_date, renewalResult?.dueDate, renewalResult?.date_due, '']);
+          logger.info('Renew', `[BATCH] Renewed: ${barcode}`, { requestId });
+        } catch (kohaError) {
+          result.message = parseKohaRenewalError(kohaError);
+          logger.warn('Renew', `[BATCH] Renewal denied for ${barcode}: ${kohaError.message}`, { requestId });
+        }
+      } catch (itemError) {
+        result.message = itemError.message || 'Renewal failed. Please contact staff.';
+        logger.error('Renew', `[BATCH] Error processing ${barcode}: ${itemError.message}`, { requestId });
+      }
+
+      results.push(result);
+    }
+
+    const successCount = results.filter((r) => r.ok).length;
+    logger.info('Renew', `[BATCH DONE] ${successCount}/${barcodes.length} renewed`, { requestId });
+    sendJson(res, 200, { success: true, results });
+  } catch (error) {
+    logger.error('Renew', `[BATCH CRITICAL] ${error.message}`, { requestId, stack: error.stack });
+    sendJson(res, 500, { success: false, message: error.message || 'Batch renewal failed' });
+  }
+}
+
+// ─── End Renew Batch & Items-Out ─────────────────────────────────────────────
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  QR RECEIPT MODULE — Renew Flow Only
+//  New, isolated endpoints:
+//    POST /api/receipt/qr
+//    GET  /receipt/pdf/:token
+//    GET  /api/receipt/qr-status/:token
+//
+//  Does NOT modify any existing Check-In / Check-Out / Account endpoints.
+//  No shared service is changed — pdfkit usage is local to this module.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const QR_TOKEN_TTL_SEC  = 180;
+const QR_TEMP_DIR       = path.join(__dirname, 'tmp', 'receipts');
+const RECEIPT_PUBLIC_BASE_URL = (process.env.RECEIPT_PUBLIC_BASE_URL || '').trim();
+const RECEIPT_LOCAL_BASE_URL  = (process.env.RECEIPT_LOCAL_BASE_URL  || '').trim();
+
+// Ensure temp directory exists
+try { fs.mkdirSync(QR_TEMP_DIR, { recursive: true }); } catch (_) {}
+
+/** In-memory token store: token -> { txData, pdfPath, downloaded, expiresAt } */
+const QR_TOKENS = new Map();
+
+/** Generate cryptographically random URL-safe token */
+function generateQrToken() {
+  return crypto.randomBytes(24).toString('hex');
+}
+
+/** Auto-detect the kiosk's LAN IPv4 address (first non-loopback, non-link-local) */
+function getLanIp() {
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name]) {
+      if (
+        iface.family === 'IPv4' &&
+        !iface.internal &&                    // skip 127.x.x.x
+        !iface.address.startsWith('169.254')  // skip link-local
+      ) {
+        return iface.address;  // e.g. 192.168.1.147
+      }
+    }
+  }
+  return null;
+}
+
+/** Choose the base URL for the QR link */
+function resolveReceiptBaseUrl(req) {
+  if (RECEIPT_PUBLIC_BASE_URL) return { url: RECEIPT_PUBLIC_BASE_URL, localOnly: false };
+  if (RECEIPT_LOCAL_BASE_URL)  return { url: RECEIPT_LOCAL_BASE_URL,  localOnly: true  };
+
+  // Auto-detect LAN IP so the QR URL is reachable from phones on the same Wi-Fi.
+  // NEVER fall back to 127.0.0.1 (loopback) — that only works on this machine.
+  const lanIp = getLanIp();
+  if (lanIp) return { url: `http://${lanIp}:${PORT}`, localOnly: true };
+
+  // Last resort (packaged app on unusual network): use hostname
+  const host = req.headers.host || `localhost:${PORT}`;
+  return { url: `http://${host}`, localOnly: true };
+}
+
+/** Generate a PDF receipt buffer using pdfkit */
+async function generateReceiptPdf(tx) {
+  return new Promise((resolve, reject) => {
+    if (!PDFDocument) {
+      return reject(new Error('PDFDocument library not available'));
+    }
+
+    const doc    = new PDFDocument({ margin: 40, size: 'A4' });
+    const chunks = [];
+
+    doc.on('data',  (c) => chunks.push(c));
+    doc.on('end',   () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    const now      = new Date(tx.timestamp || Date.now());
+    const dateStr  = now.toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
+    const timeStr  = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+
+    // Header
+    doc.fontSize(18).font('Helvetica-Bold').text('Punjabi University Library', { align: 'center' });
+    doc.fontSize(11).font('Helvetica').text('Renewal Receipt', { align: 'center' });
+    doc.moveDown(0.5);
+    doc.moveTo(40, doc.y).lineTo(555, doc.y).stroke();
+    doc.moveDown(0.6);
+
+    // Meta
+    doc.fontSize(10).font('Helvetica-Bold').text('Date: ', { continued: true })
+       .font('Helvetica').text(dateStr);
+    doc.font('Helvetica-Bold').text('Time: ', { continued: true })
+       .font('Helvetica').text(timeStr);
+    if (tx.patronName) {
+      doc.font('Helvetica-Bold').text('Patron: ', { continued: true })
+         .font('Helvetica').text(String(tx.patronName));
+    }
+    doc.moveDown(0.6);
+
+    // Summary line
+    const items        = Array.isArray(tx.items) ? tx.items : [];
+    const renewedCount = items.filter((i) => i.status === 'renewed').length;
+    doc.fontSize(10).font('Helvetica-Bold')
+       .text(`Items renewed: ${renewedCount} of ${items.length}`);
+    doc.moveDown(0.4);
+
+    // Table header
+    const colX = { title: 40, status: 330, due: 435 };
+    doc.fontSize(9).font('Helvetica-Bold').fillColor('#333');
+    doc.text('Item Title',  colX.title,  doc.y, { width: 280 });
+    const rowY = doc.y - doc.currentLineHeight();
+    doc.text('Status',     colX.status, rowY,  { width: 95  });
+    doc.text('New Due',    colX.due,    rowY,  { width: 110 });
+    doc.moveDown(0.2);
+    doc.moveTo(40, doc.y).lineTo(555, doc.y).stroke('#aaa');
+    doc.moveDown(0.3);
+
+    // Table rows
+    items.forEach((item) => {
+      const isOk      = item.status === 'renewed';
+      const statusTxt = isOk ? '✓ Renewed' : '✗ Not renewed';
+      const dueTxt    = item.newDueDate
+        ? new Date(item.newDueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+        : (isOk ? 'See librarian' : '—');
+      const title     = String(item.title || item.barcode || 'Unknown item').slice(0, 60);
+
+      const rowStart = doc.y;
+      doc.fontSize(9).font('Helvetica').fillColor('#111').text(title, colX.title, rowStart, { width: 280 });
+      const afterTitle = doc.y;
+
+      doc.fontSize(9).font('Helvetica-Bold')
+         .fillColor(isOk ? '#065f46' : '#991b1b')
+         .text(statusTxt, colX.status, rowStart, { width: 95 });
+      doc.fillColor('#111').font('Helvetica')
+         .text(dueTxt, colX.due, rowStart, { width: 110 });
+
+      doc.y = Math.max(afterTitle, doc.y);
+      doc.moveDown(0.2);
+      doc.moveTo(40, doc.y).lineTo(555, doc.y).stroke('#e8e8e8');
+      doc.moveDown(0.2);
+    });
+
+    doc.moveDown(1);
+    doc.moveTo(40, doc.y).lineTo(555, doc.y).stroke('#ccc');
+    doc.moveDown(0.5);
+
+    // Footer
+    doc.fontSize(8).font('Helvetica').fillColor('#777')
+       .text('Thank you for using Punjabi University Library.', { align: 'center' })
+       .text('Please return items on or before the due date shown.', { align: 'center' })
+       .text('Powered by SoCTeamup Semiconductors', { align: 'center' });
+
+    doc.end();
+  });
+}
+
+/**
+ * POST /api/receipt/qr
+ * Body: { transactionData: { ... } }
+ * Returns: { token, url, expiresAt, localOnly }
+ *
+ * ISOLATED — only called from Renew receipt screen.
+ */
+async function handleQrReceiptCreate(req, res) {
+  try {
+    const body = await parseRequestBody(req);
+    const tx   = body.transactionData;
+
+    if (!tx || typeof tx !== 'object') {
+      sendJson(res, 400, { success: false, message: 'transactionData is required' });
+      return;
+    }
+
+    if (!PDFDocument) {
+      sendJson(res, 503, { success: false, message: 'PDF generation is not available (pdfkit not installed)' });
+      return;
+    }
+
+    const token     = generateQrToken();
+    const expiresAt = new Date(Date.now() + QR_TOKEN_TTL_SEC * 1000);
+    const pdfPath   = path.join(QR_TEMP_DIR, `receipt_${token}.pdf`);
+
+    // Generate PDF
+    const pdfBuf = await generateReceiptPdf(tx);
+    fs.writeFileSync(pdfPath, pdfBuf);
+
+    // Store token
+    QR_TOKENS.set(token, {
+      txData    : tx,
+      pdfPath,
+      downloaded: false,
+      expiresAt
+    });
+
+    const { url: baseUrl, localOnly } = resolveReceiptBaseUrl(req);
+    const pdfUrl = `${baseUrl}/receipt/pdf/${token}`;
+
+    logger.info('QR-Receipt', `Token created: ${token.slice(0, 8)}… expires ${expiresAt.toISOString()}`);
+
+    sendJson(res, 200, {
+      token,
+      url      : pdfUrl,
+      expiresAt: expiresAt.toISOString(),
+      localOnly
+    });
+  } catch (error) {
+    logger.error('QR-Receipt', `Create failed: ${error.message}`);
+    sendJson(res, 500, { success: false, message: error.message || 'Failed to generate QR receipt' });
+  }
+}
+
+/**
+ * GET /receipt/pdf/:token
+ * Serves the PDF if token is valid and not expired.
+ * Marks downloaded=true on first successful download.
+ *
+ * ISOLATED — not reachable from Check-In / Check-Out / Account flows.
+ */
+function handleQrReceiptPdf(req, res, token) {
+  const entry = QR_TOKENS.get(token);
+
+  if (!entry) {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Receipt not found or already expired.');
+    return;
+  }
+
+  if (Date.now() > entry.expiresAt.getTime()) {
+    QR_TOKENS.delete(token);
+    try { fs.unlinkSync(entry.pdfPath); } catch (_) {}
+    res.writeHead(410, { 'Content-Type': 'text/plain' });
+    res.end('Receipt link has expired.');
+    return;
+  }
+
+  let pdfBuf;
+  try {
+    pdfBuf = fs.readFileSync(entry.pdfPath);
+  } catch (_) {
+    res.writeHead(500, { 'Content-Type': 'text/plain' });
+    res.end('Receipt file unavailable.');
+    return;
+  }
+
+  // Mark as downloaded on first access
+  if (!entry.downloaded) {
+    entry.downloaded = true;
+    logger.info('QR-Receipt', `PDF downloaded for token ${token.slice(0, 8)}…`);
+  }
+
+  res.writeHead(200, {
+    'Content-Type'        : 'application/pdf',
+    'Content-Length'      : pdfBuf.length,
+    'Content-Disposition' : 'attachment; filename="renewal-receipt.pdf"',
+    'Cache-Control'       : 'no-store',
+    'Access-Control-Allow-Origin': '*'
+  });
+  res.end(pdfBuf);
+}
+
+/**
+ * GET /api/receipt/qr-status/:token
+ * Returns: { downloaded, remainingSeconds, expired }
+ *
+ * ISOLATED — polled only by qr-receipt.js in the Renew receipt screen.
+ */
+function handleQrReceiptStatus(req, res, token) {
+  const entry = QR_TOKENS.get(token);
+
+  if (!entry) {
+    sendJson(res, 200, { downloaded: false, remainingSeconds: 0, expired: true });
+    return;
+  }
+
+  const remaining = Math.max(0, Math.floor((entry.expiresAt.getTime() - Date.now()) / 1000));
+  const expired   = remaining === 0;
+
+  if (expired) {
+    QR_TOKENS.delete(token);
+    try { fs.unlinkSync(entry.pdfPath); } catch (_) {}
+  }
+
+  sendJson(res, 200, {
+    downloaded     : entry.downloaded,
+    remainingSeconds: remaining,
+    expired
+  });
+}
+
+/** Cleanup expired tokens + their PDFs every 60 s */
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, entry] of QR_TOKENS.entries()) {
+    if (now > entry.expiresAt.getTime()) {
+      QR_TOKENS.delete(token);
+      try { fs.unlinkSync(entry.pdfPath); } catch (_) {}
+      logger.info('QR-Receipt', `Cleaned up expired token ${token.slice(0, 8)}…`);
+    }
+  }
+}, 60 * 1000);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  End QR Receipt Module
+// ═══════════════════════════════════════════════════════════════════════════════
+
 async function handleRfidStatus(res) {
   try {
     if (!RFID_STATE.enabled) {
@@ -1841,6 +2661,44 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && reqUrl.pathname === '/api/checkin') {
     await handleCheckin(req, res);
+    return;
+  }
+
+  if (req.method === 'GET' && reqUrl.pathname === '/api/renew/items') {
+    await handleRenewItemsOut(req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && reqUrl.pathname === '/api/renew/batch') {
+    await handleRenewBatch(req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && reqUrl.pathname === '/api/renew') {
+    await handleRenew(req, res);
+    return;
+  }
+
+  // ── QR Receipt routes (Renew-only, isolated) ────────────────────────────────
+  if (req.method === 'POST' && reqUrl.pathname === '/api/receipt/qr') {
+    await handleQrReceiptCreate(req, res);
+    return;
+  }
+
+  if (req.method === 'GET' && reqUrl.pathname.startsWith('/receipt/pdf/')) {
+    const token = reqUrl.pathname.slice('/receipt/pdf/'.length);
+    handleQrReceiptPdf(req, res, token);
+    return;
+  }
+
+  if (req.method === 'GET' && reqUrl.pathname.startsWith('/api/receipt/qr-status/')) {
+    const token = reqUrl.pathname.slice('/api/receipt/qr-status/'.length);
+    handleQrReceiptStatus(req, res, token);
+    return;
+  }
+  // ── End QR Receipt routes ────────────────────────────────────────────────────
+  if (req.method === 'POST' && reqUrl.pathname === '/api/hold') {
+    await handlePlaceHold(req, res);
     return;
   }
 
