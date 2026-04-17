@@ -121,11 +121,23 @@ class LibraryKiosk {
     updateOfflineStatusUI(type, isOnline) {
         const dot = document.getElementById(`status-dot-${type}`);
         const text = document.getElementById(`status-text-${type}`);
+        const patronStatus = document.getElementById('patron-rfid-status');
 
         if (dot && text) {
             dot.className = `status-dot ${isOnline ? 'online' : 'offline'}`;
             text.className = `status-value ${isOnline ? 'online' : 'offline'}`;
             text.textContent = isOnline ? 'CONNECTED' : 'DISCONNECTED';
+        }
+
+        // Specifically update the new ATM Screen 1 indicator
+        if (type === 'rfid' && patronStatus) {
+            if (isOnline) {
+                patronStatus.textContent = '● RFID Reader Ready';
+                patronStatus.style.color = '#10b981';
+            } else {
+                patronStatus.textContent = '○ Hardware Connection Error';
+                patronStatus.style.color = '#ef4444';
+            }
         }
     }
 
@@ -206,6 +218,8 @@ class LibraryKiosk {
         document.getElementById('btn-confirm-checkout')?.addEventListener('click', (e) => { e.preventDefault(); this.handleConfirmCheckout(); });
         document.getElementById('checkin-form')?.addEventListener('submit', (e) => this.handleCheckInSubmit(e));
         document.getElementById('account-form')?.addEventListener('submit', (e) => this.handleAccountSubmit(e));
+        document.getElementById('search-form')?.addEventListener('submit', (e) => this.handleSearchSubmit(e));
+
 
         document.getElementById('search-form')?.addEventListener('submit', (e) => this.handleSearchSubmit(e));
 
@@ -257,6 +271,8 @@ class LibraryKiosk {
             patronCardInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
+                    if (this.currentOperation === 'checkout') {
+                        this.proceedToBookScan();
                     if (this.currentOperation === 'checkout' && this.checkoutStagedBooks && this.checkoutStagedBooks.length > 0) {
                         this.handleConfirmCheckout();
                     }
@@ -280,6 +296,133 @@ class LibraryKiosk {
         document.getElementById('btn-print-yes')?.addEventListener('click', () => { click(); this.handlePrintReceipt(true); });
         document.getElementById('btn-print-no')?.addEventListener('click', () => { click(); this.handlePrintReceipt(false); });
 
+        // ATM Check-Out two-screen flow buttons
+        document.getElementById('btn-patron-continue')?.addEventListener('click', () => { click(); this.proceedToBookScan(); });
+        document.getElementById('btn-checkout-go-account')?.addEventListener('click', () => { click(); this.handleGoToAccount(); });
+        document.getElementById('btn-checkout-finished')?.addEventListener('click', () => { click(); this.handleCheckoutFinished(); });
+        document.getElementById('btn-co-finish-overlay')?.addEventListener('click', () => { click(); this.hideCoFinishOverlay(); this.handleDoneCheckout(); });
+    }
+
+    startCheckOut() {
+        this.currentOperation = 'checkout';
+        this.scanningEnabled = false;     // Book scanning starts only after patron card confirmed (Screen 2)
+        this.checkoutSessionBooks = [];
+        this.checkoutStagedBooks = [];    // kept for legacy compat with renderCheckoutStagedBooks
+        this.checkoutProcessedBarcodes = new Set();
+        this.checkoutSessionPatronCard = '';
+        this.checkoutSessionPatronName = '';
+        this.checkoutReturnAccount = false;
+        this.recentRfidTags.clear();
+        this.pendingCheckinBarcodes.clear();
+        this.processedCheckinBarcodes.clear();
+        if (window.rfidService) window.rfidService.resetSession();
+        if (window.patronRfidService) window.patronRfidService.resetSession();
+
+        // Clear patron card input on Screen 1
+        const patronCardEl = document.getElementById('patron-card');
+        if (patronCardEl) patronCardEl.value = '';
+
+        this.showView('checkout-scan-patron');
+        this.resetAutoLogout();
+        if (window.patronRfidService) window.patronRfidService.beginCheckoutSession();
+        document.getElementById('patron-card')?.focus();
+        // RFID bridge is armed when patron card is confirmed (proceedToBookScan)
+    }
+
+    proceedToBookScan() {
+        const patronCard = (document.getElementById('patron-card')?.value || '').trim();
+        if (!patronCard) {
+            this.showError('Please scan or enter your library card number.');
+            document.getElementById('patron-card')?.focus();
+            return;
+        }
+
+        this.checkoutSessionPatronCard = patronCard;
+        this.checkoutSessionPatronName = '';
+        this.checkoutSessionBooks = [];
+        this.checkoutProcessedBarcodes = new Set();
+
+        // Update Screen 2 header
+        const patronDisplay = document.getElementById('co-patron-display');
+        if (patronDisplay) patronDisplay.textContent = `Patron: ${patronCard}`;
+
+        const countEl = document.getElementById('co-items-count');
+        if (countEl) countEl.textContent = '0';
+
+        // Reset book list to animated scanning prompt
+        const bookList = document.getElementById('co-book-list');
+        if (bookList) {
+            bookList.innerHTML = `
+                <div class="co-scan-prompt" id="co-scan-prompt">
+                    <div class="co-scan-rings">
+                        <div class="co-ring co-ring-1"></div>
+                        <div class="co-ring co-ring-2"></div>
+                        <div class="co-ring co-ring-3"></div>
+                        <span class="co-ring-icon">📡</span>
+                    </div>
+                    <p class="co-scan-prompt-text">Place books on the RFID reader</p>
+                </div>`;
+        }
+
+        // Enable RFID book scanning
+        this.scanningEnabled = true;
+        if (window.rfidService) window.rfidService.resetSession();
+
+        this.showView('checkout-scan-books');
+        this.resetAutoLogout();
+
+        // Arm RFID bridge for checkout (AFI 0x00 = checked-out mark)
+        void this.armRfidBridge('00');
+        if (window.rfidService?.activateLiveScan) {
+            window.rfidService.activateLiveScan({
+                graceMs: 5000,
+                bootstrapPolls: 8,
+                bootstrapIntervalMs: 175
+            });
+        }
+    }
+
+    handleCheckoutFinished() {
+        if (!this.checkoutSessionBooks || this.checkoutSessionBooks.length === 0) {
+            this.showError('No books were successfully checked out. Please scan books on the reader first.');
+            return;
+        }
+        this.handleDoneCheckout();
+    }
+
+    async handleGoToAccount() {
+        // Mark origin so the overlay button is shown on the account view
+        this.checkoutReturnAccount = true;
+        this.scanningEnabled = false;
+        void this.disarmRfidBridge(true);
+
+        // Show beautiful loading transition
+        this.showView('checkout-account-loading');
+        await this.delay(1500);
+
+        // Preserve patron card before startAccount() resets service state
+        const savedPatronCard = this.checkoutSessionPatronCard;
+
+        // Navigate to account (sets currentOperation = 'account')
+        this.startAccount();
+
+        // Pre-fill patron card and auto-trigger account lookup
+        if (savedPatronCard) {
+            const accountCardEl = document.getElementById('account-card');
+            if (accountCardEl) {
+                accountCardEl.value = savedPatronCard;
+                const accountForm = document.getElementById('account-form');
+                if (accountForm) {
+                    accountForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                }
+            }
+        }
+    }
+
+    hideCoFinishOverlay() {
+        const overlay = document.getElementById('btn-co-finish-overlay');
+        if (overlay) overlay.style.display = 'none';
+        this.checkoutReturnAccount = false;
         // Renew module — new 5-step multi-item flow
         document.getElementById('renew-items-back')?.addEventListener('click', () => { click(); this.startRenew(); });
         document.getElementById('renew-select-all')?.addEventListener('click', () => { click(); this._toggleSelectAllRenew(true); });
@@ -865,6 +1008,10 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
 
         document.getElementById('account-form')?.reset();
         const resultsContainer = document.getElementById('account-results');
+        if (resultsContainer) {
+            resultsContainer.innerHTML = '';
+            resultsContainer.style.display = 'none';
+        }
         // Reset UI to login screen
         const loginScreen = document.getElementById('account-login-screen');
         const dashboard = document.getElementById('account-dashboard');
@@ -883,6 +1030,8 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         this.showView('account');
         this.resetAutoLogout();
         if (window.patronRfidService?.beginAccountSession) window.patronRfidService.beginAccountSession();
+        document.getElementById('account-card')?.focus();
+        void this.disarmRfidBridge(true);
         void this.disarmRfidBridge(true);
 
         // Auto-focus HID input
@@ -958,6 +1107,8 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         `;
 
         results.forEach(book => {
+            const statusColor = book.status === 'available' ? 'var(--success)' : 'var(--warning)';
+            const statusText = book.status === 'available' ? 'Available' : 'Checked Out';
             const statusColor = book.status === 'available' ? '#10b981' : '#f59e0b';
             const statusText = book.status === 'available' ? 'Available' : 'Checked Out';
             const holdBtn = book.status !== 'available'
@@ -1014,6 +1165,10 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         this.showView('print-receipt');
     }
 
+    async handlePrintReceipt(willPrint) {
+        if (willPrint) {
+            if (this.printType === 'checkout') {
+                await this.executeSysPrint('checkout', {
     handlePrintReceipt(willPrint) {
         if (willPrint) {
             if (this.printType === 'checkout') {
@@ -1023,6 +1178,7 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
                     books: this.checkoutSessionBooks
                 });
             } else if (this.printType === 'checkin') {
+                await this.executeSysPrint('checkin', {
                 this.executeSysPrint('checkin', {
                     books: this.checkinSessionBooks
                 });
@@ -1034,6 +1190,10 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
             this.showThankYouSummary(count);
         } else {
             this.showThankYouSummary(this.checkinSessionCount);
+        }
+    }
+
+    async executeSysPrint(type, data) {
             this.showCheckinSummary();
         }
     }
@@ -1066,6 +1226,45 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
             `;
         });
 
+        // Optimization: removed 'margin: 0 auto' and centering for strict thermal left-alignment.
+        // Fixed width to 80mm as requested for modern thermal printers (fits 58mm via @page zoom if needed).
+        const receiptContent = `
+            <div id="sys-print-receipt" style="font-family: 'Courier New', Courier, monospace; width: 80mm; color: #000; padding: 5px; margin: 0; box-sizing: border-box;">
+                <div style="text-align: center; margin-bottom: 10px;">
+                    <h2 style="font-size: 16px; margin: 4px 0; font-weight: bold;">${collegeName}</h2>
+                    <h2 style="font-size: 16px; margin: 4px 0; font-weight: bold;">Smart Library Kiosk</h2>
+                    <div style="font-size: 11px;">${dateStr}</div>
+                </div>
+                
+                ${data.patronCard ? `<div style="text-align: left; font-size: 12px; margin-bottom: 10px; font-weight: bold; border-bottom: 1px solid #000; padding-bottom: 4px;">Patron: ${data.patronName || data.patronCard} <br>Card: ${data.patronCard}</div>` : ''}
+                
+                <div style="text-align: left; font-weight: bold; margin-bottom: 6px; border-bottom: 1px dashed #000; padding-bottom: 4px;">
+                    ${type === 'checkout' ? 'Checked Out Items' : 'Checked In Items'}
+                </div>
+                
+                <div style="text-align: left; font-size: 11px;">
+                    ${booksHtml}
+                </div>
+                
+                <div style="margin-top: 15px; font-size: 11px; font-style: italic; text-align: center;">Thank you for visiting!</div>
+                <div style="margin-top: 20px;">.</div> <!-- Extra padding for thermal tear-off -->
+            </div>
+        `;
+
+        // Strictly use Electron physical print and handle connection errors.
+        if (window.electronAPI && window.electronAPI.printReceipt) {
+            const result = await window.electronAPI.printReceipt(receiptContent);
+            if (!result.success) {
+                console.error('[Kiosk] Printing failed:', result.error);
+                if (result.error === 'NO_PHYSICAL_PRINTER') {
+                    this.showError('No thermal printer found. Please notify staff.');
+                } else {
+                    this.showError(`Print error: ${result.error}`);
+                }
+            }
+        } else {
+            console.error('[Kiosk] Native printing API not found.');
+            this.showError('Printing unavailable: Native module missing.');
         const receiptContent = `
             <div id="sys-print-receipt" style="font-family: 'Courier New', Courier, monospace; text-align: center; width: 70mm; margin: 0 auto; color: #000; padding: 10px;">
                 <h2 style="font-size: 16px; margin: 4px 0; font-weight: bold;">${collegeName}</h2>
@@ -1406,6 +1605,79 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         if (this.currentOperation !== 'checkout') return;
         if (!barcode) return;
 
+        // Dedup — prevent the same barcode being processed twice in one session
+        if (!this.checkoutProcessedBarcodes) this.checkoutProcessedBarcodes = new Set();
+        if (this.checkoutProcessedBarcodes.has(barcode)) return;
+
+        // Patron must be confirmed before book scanning is meaningful
+        const patronCard = this.checkoutSessionPatronCard;
+        if (!patronCard) return;
+
+        this.checkoutProcessedBarcodes.add(barcode);
+
+        // Ensure Screen 2 book list container exists
+        const bookList = document.getElementById('co-book-list');
+        if (!bookList) return;
+
+        // Remove the scanning prompt on first book detection
+        const prompt = document.getElementById('co-scan-prompt');
+        if (prompt) prompt.remove();
+
+        // Add a "processing" row immediately so patron sees feedback
+        const row = document.createElement('div');
+        row.className = 'co-book-row co-book-processing';
+        row.innerHTML = `
+            <div class="co-book-icon-cell"><div class="co-row-spinner"></div></div>
+            <div class="co-book-info">
+                <div class="co-book-title">${barcode}</div>
+                <div class="co-book-status">Processing…</div>
+            </div>
+            <div class="co-book-due">—</div>
+        `;
+        bookList.appendChild(row);
+
+        // Update live count
+        const countEl = document.getElementById('co-items-count');
+        if (countEl) countEl.textContent = bookList.querySelectorAll('.co-book-row').length;
+
+        // Call checkout API (identical arguments to the original handleConfirmCheckout)
+        try {
+            const result = await this.api.checkOut(patronCard, barcode, {
+                rfidUid: uid,
+                skipSecurityWrite: false
+            });
+
+            const title = result.data?.itemTitle || barcode;
+            const dueDate = this.formatDate(this.parseCalendarDate(result.data?.dueDate));
+
+            row.className = 'co-book-row co-book-success';
+            row.innerHTML = `
+                <div class="co-book-icon-cell">✅</div>
+                <div class="co-book-info">
+                    <div class="co-book-title">${title}</div>
+                    <div class="co-book-status">Checked out successfully</div>
+                </div>
+                <div class="co-book-due">${dueDate}</div>
+            `;
+
+            if (!this.checkoutSessionBooks) this.checkoutSessionBooks = [];
+            this.checkoutSessionBooks.push({ title, barcode, dueDate });
+            this.checkoutSessionPatronName = result.data?.patronName || patronCard;
+
+            if (typeof KioskSounds !== 'undefined') KioskSounds.success();
+            void this.armRfidBridge('00');   // Re-arm for next tag
+
+        } catch (error) {
+            row.className = 'co-book-row co-book-error';
+            row.innerHTML = `
+                <div class="co-book-icon-cell">❌</div>
+                <div class="co-book-info">
+                    <div class="co-book-title">${barcode}</div>
+                    <div class="co-book-status">${error.message || 'Checkout failed'}</div>
+                </div>
+                <div class="co-book-due">—</div>
+            `;
+            if (typeof KioskSounds !== 'undefined') KioskSounds.error();
         const exists = this.checkoutStagedBooks.find(b => b.barcode === barcode);
         if (!exists) {
             this.checkoutStagedBooks.push({ barcode, uid: uid || '' });
@@ -1932,6 +2204,18 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
                 this.pendingCheckinBarcodes.clear();
                 void this.disarmRfidBridge(true);
                 this.triggerHardwareLED('OFF');
+                this.checkoutReturnAccount = false;
+            }
+
+            // Show or hide the floating "Finish Checkout" overlay button
+            const coOverlay = document.getElementById('btn-co-finish-overlay');
+            if (coOverlay) {
+                if (viewName === 'account' && this.checkoutReturnAccount) {
+                    coOverlay.style.display = '';
+                    coOverlay.style.animation = 'coOverlaySlideIn 0.4s cubic-bezier(0.4,0,0.2,1)';
+                } else if (viewName !== 'account') {
+                    coOverlay.style.display = 'none';
+                }
             }
         }
 

@@ -434,6 +434,97 @@
 
     <!-- My Account View -->
     <div id="view-account" class="view">
+      <div class="form-container account-container">
+        <h1 class="form-title">My Account</h1>
+        <form id="account-form">
+          <div class="form-group">
+            <label for="account-card" class="form-label">Patron Card Number</label>
+            <input type="text" id="account-card" class="form-input" placeholder="Enter patron card number" required
+              autocomplete="off">
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="btn btn-secondary btn-cancel">Home</button>
+            <button type="submit" class="btn btn-primary">Search</button>
+          </div>
+        </form>
+
+        <div id="account-results" class="account-results" style="display: none;"></div>
+      </div>
+    </div>
+
+    <!-- Check-Out Screen 1: Scan Patron Card -->
+    <div id="view-checkout-scan-patron" class="view">
+      <div class="co-scan-patron-wrapper">
+        <button type="button" class="btn-cancel co-close-btn">✕ Cancel</button>
+        <div class="co-session-tag">Scanning Session</div>
+        <div class="co-card-icon">🪪</div>
+        <h1 class="co-patron-heading">Scan Patron Card</h1>
+        <p class="co-patron-instruction">
+          Please scan your library card <strong>(BARCODE UP)</strong> under the scanline
+        </p>
+        <div class="co-patron-input-group">
+          <input type="text" id="patron-card" class="co-patron-input"
+            placeholder="Waiting for card scan…" autocomplete="off" inputmode="numeric">
+          <div id="patron-rfid-status" class="co-patron-status">
+            Patron RFID reader initialising…
+          </div>
+        </div>
+        <button type="button" id="btn-patron-continue" class="co-continue-btn">
+          Continue →
+        </button>
+        <p class="co-demo-hint">Demo mode: Try card numbers <strong>11111</strong> · <strong>22222</strong> · <strong>33333</strong></p>
+      </div>
+    </div>
+
+    <!-- Check-Out Screen 2: Scan Books (RFID real-time) -->
+    <div id="view-checkout-scan-books" class="view">
+      <div class="co-books-wrapper">
+        <div class="co-books-header">
+          <div class="co-books-header-left">
+            <div class="co-books-title">Check-out</div>
+            <div class="co-books-patron" id="co-patron-display">Patron: —</div>
+          </div>
+          <div class="co-items-badge">Items: <span id="co-items-count">0</span></div>
+        </div>
+
+        <div id="co-book-list" class="co-book-list">
+          <div class="co-scan-prompt" id="co-scan-prompt">
+            <div class="co-scan-rings">
+              <div class="co-ring co-ring-1"></div>
+              <div class="co-ring co-ring-2"></div>
+              <div class="co-ring co-ring-3"></div>
+              <span class="co-ring-icon">📡</span>
+            </div>
+            <p class="co-scan-prompt-text">Place books on the RFID reader</p>
+          </div>
+        </div>
+
+        <div class="co-action-buttons">
+          <button type="button" id="btn-checkout-go-account" class="co-btn-account">
+            👤 Go to Account
+          </button>
+          <button type="button" id="btn-checkout-finished" class="co-btn-finish">
+            ✓ Finished
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Check-Out → Account: Beautiful Loading Transition -->
+    <div id="view-checkout-account-loading" class="view">
+      <div class="co-loading-wrapper">
+        <div class="co-loading-orb">
+          <div class="co-loading-ring co-loading-ring-1"></div>
+          <div class="co-loading-ring co-loading-ring-2"></div>
+          <div class="co-loading-ring co-loading-ring-3"></div>
+          <div class="co-loading-icon">👤</div>
+        </div>
+        <h2 class="co-loading-title">Connecting to your account</h2>
+        <p class="co-loading-subtitle">Please wait a moment…</p>
+        <div class="co-loading-dots">
+          <span></span><span></span><span></span>
+        </div>
       <!-- Login Screen -->
       <div id="account-login-screen" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 2rem;">
         <div style="background: white; border-radius: 1rem; box-shadow: 0 20px 60px rgba(0,0,0,0.12); padding: 2.5rem 3rem; max-width: 480px; width: 100%; text-align: center;">
@@ -832,6 +923,14 @@
       <div class="form-actions" style="justify-content: center; margin-top: 2rem;">
         <button type="button" class="btn btn-primary btn-new">New Check-In</button>
         <button type="button" class="btn btn-secondary btn-cancel">Home</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating "Finish Checkout" button — visible only when viewing account post-checkout -->
+  <button type="button" id="btn-co-finish-overlay" style="display:none;">
+    ✓ Finish Checkout
+  </button>
   <!-- Check-In Success View -->
   <div id="view-checkin-success" class="view">
     <div class="success-container"

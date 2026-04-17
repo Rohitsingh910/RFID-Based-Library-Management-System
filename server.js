@@ -610,6 +610,10 @@ function startRfidMonitor() {
       }
 
       if (!RFID_STATE.child || RFID_STATE.status !== 'running') {
+        const lastCrash = Number(RFID_STATE.child?.exitTime || 0);
+        if (Date.now() - lastCrash < 2000) {
+          return; // Wait at least 2s after a crash before restarting
+        }
         await ensureRfidBridgeStarted();
         return;
       }
@@ -689,6 +693,17 @@ async function ensureRfidBridgeStarted() {
     RFID_STATE.status = 'compiling';
     RFID_STATE.lastError = '';
     logger.info('RFID', 'Compiling RFID bridge...');
+    try {
+      await compileRfidBridge();
+      if (RFID_STATE.compileLog && RFID_STATE.compileLog.includes('Compilation failed')) {
+        throw new Error('Bridge compilation failed. Check rfid-integration/build/compile.log');
+      }
+    } catch (compileError) {
+      logger.error('RFID', 'Compilation failed: ' + compileError.message);
+      RFID_STATE.status = 'error';
+      RFID_STATE.lastError = compileError.message;
+      throw compileError;
+    }
     await compileRfidBridge();
 
     RFID_STATE.status = 'starting';
@@ -703,11 +718,16 @@ async function ensureRfidBridgeStarted() {
     });
 
     RFID_STATE.child = child;
+    child.exitTime = 0;
 
     child.stdout.on('data', createBridgeOutputHandler('stdout'));
     child.stderr.on('data', createBridgeOutputHandler('stderr'));
 
     child.on('exit', (code, signal) => {
+      if (RFID_STATE.child === child) {
+          RFID_STATE.child = null;
+      }
+      child.exitTime = Date.now();
       RFID_STATE.child = null;
       RFID_STATE.status = 'stopped';
       RFID_STATE.lastError = `RFID bridge exited (code=${code}, signal=${signal || 'none'})`;
@@ -721,6 +741,15 @@ async function ensureRfidBridgeStarted() {
     });
 
     logger.info('RFID', 'Waiting for bridge to become healthy...');
+    try {
+        await waitForBridgeReady(25000); // Increased timeout to 25s
+        logger.info('RFID', 'RFID bridge is running and healthy');
+        RFID_STATE.status = 'running';
+    } catch (healthyError) {
+        logger.error('RFID', 'Bridge failed to reach healthy state: ' + healthyError.message);
+        stopRfidBridge();
+        throw healthyError;
+    }
     await waitForBridgeReady();
     logger.info('RFID', 'RFID bridge is running and healthy');
     RFID_STATE.status = 'running';
@@ -728,6 +757,7 @@ async function ensureRfidBridgeStarted() {
     .catch((error) => {
       RFID_STATE.status = 'error';
       RFID_STATE.lastError = error.message;
+      if (RFID_STATE.child) stopRfidBridge();
       RFID_STATE.child = null;
       throw error;
     })

@@ -429,6 +429,11 @@ class PatronRfidService {
         }
 
         const isCheckout = window.kioskApp.currentOperation === 'checkout';
+        const isAccount = window.kioskApp.currentOperation === 'account';
+        if (!isCheckout && !isAccount) return;
+
+        const targetInputId = isCheckout ? 'patron-card' : 'account-card';
+        const patronCardEl = document.getElementById(targetInputId);
         const isAccount  = window.kioskApp.currentOperation === 'account';
         const isRenew    = window.kioskApp.currentOperation === 'renew';
 
@@ -478,6 +483,9 @@ class PatronRfidService {
             );
             return;
         }
+
+        const safeValue = String(tagValue || '').trim();
+        if (!safeValue) return;
 
         patronCardEl.value = safeValue;
         patronCardEl.dispatchEvent(new Event('input', { bubbles: true }));

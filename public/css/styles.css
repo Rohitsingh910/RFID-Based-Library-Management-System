@@ -692,3 +692,543 @@ body::before {
   font-size: 0.9rem;
   opacity: 0.9;
 }
+
+/* ============================================
+   ATM Check-Out — Two-Screen Kiosk Flow
+   ============================================ */
+
+/* ── Screen 1: Scan Patron Card ── */
+.co-scan-patron-wrapper {
+  min-height: calc(100vh - 220px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 2rem 1rem 3rem;
+  position: relative;
+}
+
+.co-close-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: none;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.5rem 1rem;
+  border-radius: 10px;
+  transition: color 0.2s, background 0.2s, border-color 0.2s;
+  font-family: 'Outfit', sans-serif;
+}
+
+.co-close-btn:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.07);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.co-session-tag {
+  display: inline-block;
+  background: linear-gradient(135deg, #0ea5e9, #2563eb);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  padding: 0.4rem 1.4rem;
+  border-radius: 50px;
+  margin-bottom: 2rem;
+  font-family: 'Outfit', sans-serif;
+}
+
+.co-card-icon {
+  font-size: 5.5rem;
+  margin-bottom: 1.25rem;
+  animation: coIconFloat 3s ease-in-out infinite;
+  filter: drop-shadow(0 8px 20px rgba(14, 165, 233, 0.2));
+}
+
+@keyframes coIconFloat {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-12px); }
+}
+
+.co-patron-heading {
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: #0f172a;
+  margin-bottom: 0.75rem;
+  font-family: 'Outfit', sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.co-patron-instruction {
+  font-size: 1.05rem;
+  color: #64748b;
+  max-width: 420px;
+  line-height: 1.65;
+  margin-bottom: 2rem;
+}
+
+.co-patron-input-group {
+  width: 100%;
+  max-width: 440px;
+  margin-bottom: 1.75rem;
+}
+
+.co-patron-input {
+  width: 100%;
+  padding: 1.1rem 1.5rem;
+  font-size: 1.4rem;
+  font-family: 'Outfit', sans-serif;
+  font-weight: 600;
+  border: 2.5px solid #e2e8f0;
+  border-radius: 16px;
+  background: #f8fafc;
+  color: #0f172a;
+  text-align: center;
+  letter-spacing: 3px;
+  transition: border-color 0.25s, box-shadow 0.25s, background 0.25s;
+  outline: none;
+}
+
+.co-patron-input:focus {
+  border-color: #0ea5e9;
+  background: #fff;
+  box-shadow: 0 0 0 5px rgba(14, 165, 233, 0.12);
+}
+
+.co-patron-status {
+  margin-top: 0.75rem;
+  padding: 0.6rem 1rem;
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.18);
+  color: #b91c1c;
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-align: left;
+  transition: background 0.3s, color 0.3s, border-color 0.3s;
+}
+
+.co-continue-btn {
+  background: linear-gradient(135deg, #0ea5e9, #2563eb);
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-family: 'Outfit', sans-serif;
+  padding: 0.95rem 3.5rem;
+  border-radius: 50px;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 8px 28px -5px rgba(14, 165, 233, 0.45);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  margin-bottom: 1.25rem;
+}
+
+.co-continue-btn:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 35px -5px rgba(14, 165, 233, 0.55);
+}
+
+.co-demo-hint {
+  color: #94a3b8;
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+}
+
+/* ── Screen 2: Scan Books ── */
+.co-books-wrapper {
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 20px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.07);
+  overflow: hidden;
+  min-height: 520px;
+}
+
+.co-books-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.25rem 1.75rem;
+  background: #fff;
+  border-bottom: 3px solid #0ea5e9;
+}
+
+.co-books-title {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #0f172a;
+  font-family: 'Outfit', sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.co-books-patron {
+  font-size: 0.9rem;
+  color: #64748b;
+  font-weight: 500;
+  margin-top: 0.2rem;
+}
+
+.co-items-badge {
+  background: linear-gradient(135deg, #0ea5e9, #2563eb);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: 'Outfit', sans-serif;
+  padding: 0.55rem 1.4rem;
+  border-radius: 50px;
+  white-space: nowrap;
+}
+
+.co-book-list {
+  flex: 1;
+  overflow-y: auto;
+  background: #f8fafc;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 300px;
+  max-height: 380px;
+}
+
+/* Scanning prompt shown before any book is detected */
+.co-scan-prompt {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  gap: 1.25rem;
+}
+
+.co-scan-rings {
+  position: relative;
+  width: 100px;
+  height: 100px;
+}
+
+.co-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  border-top-color: #0ea5e9;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  animation: coRingSpin linear infinite;
+}
+
+.co-ring-1 { width: 100px; height: 100px; animation-duration: 1.3s; opacity: 0.9; }
+.co-ring-2 { width: 72px;  height: 72px;  animation-duration: 1.0s; opacity: 0.6; animation-direction: reverse; border-top-color: #38bdf8; }
+.co-ring-3 { width: 46px;  height: 46px;  animation-duration: 0.7s; opacity: 0.4; border-top-color: #7dd3fc; }
+
+@keyframes coRingSpin {
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+.co-ring-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 1.5rem;
+}
+
+.co-scan-prompt-text {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-align: center;
+  font-family: 'Outfit', sans-serif;
+}
+
+/* Individual book rows */
+.co-book-row {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  animation: coRowAppear 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background 0.4s, border-color 0.4s;
+}
+
+@keyframes coRowAppear {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.co-book-processing {
+  background: rgba(14, 165, 233, 0.05);
+  border-color: rgba(14, 165, 233, 0.2);
+}
+
+.co-book-success {
+  background: rgba(16, 185, 129, 0.07);
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+.co-book-error {
+  background: rgba(239, 68, 68, 0.06);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.co-book-icon-cell {
+  font-size: 1.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.7);
+  flex-shrink: 0;
+}
+
+.co-row-spinner {
+  width: 22px;
+  height: 22px;
+  border: 3px solid rgba(14, 165, 233, 0.2);
+  border-top-color: #0ea5e9;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.co-book-info {
+  min-width: 0;
+}
+
+.co-book-title {
+  font-weight: 700;
+  color: #0f172a;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.co-book-status {
+  font-size: 0.8rem;
+  color: #64748b;
+  margin-top: 0.2rem;
+  font-weight: 500;
+}
+
+.co-book-success .co-book-status { color: #059669; }
+.co-book-error   .co-book-status { color: #dc2626; }
+
+.co-book-due {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #0ea5e9;
+  text-align: right;
+  white-space: nowrap;
+  min-width: 80px;
+}
+
+.co-book-error .co-book-due { color: #dc2626; }
+
+/* Action buttons bar */
+.co-action-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+  border-top: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.co-btn-account {
+  padding: 1rem;
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: 'Outfit', sans-serif;
+  border-radius: 14px;
+  border: 2px solid #0ea5e9;
+  background: #fff;
+  color: #0ea5e9;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.co-btn-account:hover {
+  background: rgba(14, 165, 233, 0.07);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px -4px rgba(14, 165, 233, 0.3);
+}
+
+.co-btn-finish {
+  padding: 1rem;
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: 'Outfit', sans-serif;
+  border-radius: 14px;
+  border: none;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 6px 22px -4px rgba(16, 185, 129, 0.45);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.co-btn-finish:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px -4px rgba(16, 185, 129, 0.55);
+}
+
+/* ── Account Loading Transition ── */
+.co-loading-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 70vh;
+  text-align: center;
+  padding: 2rem;
+  background: linear-gradient(145deg, #0f172a 0%, #1e293b 60%, #0c1a33 100%);
+  border-radius: 20px;
+  color: #fff;
+}
+
+.co-loading-orb {
+  position: relative;
+  width: 130px;
+  height: 130px;
+  margin-bottom: 2.5rem;
+}
+
+.co-loading-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  transform: translate(-50%, -50%);
+  animation: coLoadRingSpin linear infinite;
+}
+
+.co-loading-ring-1 {
+  width: 130px;
+  height: 130px;
+  border-top-color: #0ea5e9;
+  border-right-color: rgba(14, 165, 233, 0.25);
+  animation-duration: 1.6s;
+}
+
+.co-loading-ring-2 {
+  width: 96px;
+  height: 96px;
+  border-top-color: #2563eb;
+  border-right-color: rgba(37, 99, 235, 0.25);
+  animation-duration: 1.15s;
+  animation-direction: reverse;
+}
+
+.co-loading-ring-3 {
+  width: 62px;
+  height: 62px;
+  border-top-color: #38bdf8;
+  border-right-color: rgba(56, 189, 248, 0.25);
+  animation-duration: 0.85s;
+}
+
+@keyframes coLoadRingSpin {
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+.co-loading-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 2.2rem;
+  animation: coLoadIconPulse 2s ease-in-out infinite;
+}
+
+@keyframes coLoadIconPulse {
+  0%, 100% { opacity: 1;    transform: translate(-50%, -50%) scale(1);    }
+  50%       { opacity: 0.75; transform: translate(-50%, -50%) scale(1.12); }
+}
+
+.co-loading-title {
+  font-size: 1.85rem;
+  font-weight: 800;
+  font-family: 'Outfit', sans-serif;
+  background: linear-gradient(to right, #fff 30%, #94a3b8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 0.6rem;
+  letter-spacing: -0.02em;
+}
+
+.co-loading-subtitle {
+  color: #64748b;
+  font-size: 1rem;
+  font-weight: 500;
+  margin-bottom: 2rem;
+}
+
+.co-loading-dots {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.co-loading-dots span {
+  width: 11px;
+  height: 11px;
+  background: #0ea5e9;
+  border-radius: 50%;
+  animation: coLoadDotBounce 1.4s ease-in-out infinite;
+}
+
+.co-loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.co-loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes coLoadDotBounce {
+  0%, 60%, 100% { transform: translateY(0);     opacity: 0.45; }
+  30%           { transform: translateY(-14px); opacity: 1; }
+}
+
+/* ── Floating "Finish Checkout" Overlay Button ── */
+#btn-co-finish-overlay {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  z-index: 500;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-family: 'Outfit', sans-serif;
+  padding: 1rem 2.75rem;
+  border-radius: 50px;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 8px 32px -5px rgba(16, 185, 129, 0.55);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#btn-co-finish-overlay:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 14px 40px -5px rgba(16, 185, 129, 0.65);
+}
+
+@keyframes coOverlaySlideIn {
+  from { transform: translateY(80px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}

@@ -15,6 +15,9 @@ const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
 
+// Global switch to suppress print dialogs across ALL windows
+app.commandLine.appendSwitch('kiosk-printing');
+
 // ─── Configuration ─────────────────────────────────────────────────────────────
 const BACKEND_PORT = 3000;
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
@@ -230,6 +233,112 @@ app.on('activate', () => {
   }
 });
 
+// IPC handler for physical thermal printing only
+ipcMain.handle('print-receipt', async (event, htmlContent) => {
+  console.log('[Printing] --- New Print Request Received ---');
+  
+  try {
+    // 1. Detect all installed printers
+    const printers = await mainWindow.webContents.getPrintersAsync();
+    console.log('[Printing] Full Printer Inventory:');
+    printers.forEach(p => {
+      console.log(`  - Name: "${p.name}", Default: ${p.isDefault}, Status: ${p.status}`);
+    });
+    
+    // 2. Define Virtual Printer keywords for exclusion
+    const virtualKeywords = ['pdf', 'xps', 'onenote', 'fax', 'microsoft print', 'wondershare', 'google cloud', 'send to'];
+    
+    // Helper to check if a printer is physical
+    const isPhysical = (p) => {
+      const name = p.name.toLowerCase();
+      return !virtualKeywords.some(kw => name.includes(kw));
+    };
+
+    // 3. New Priority Selection Logic (Supporting All Printer Types)
+    let targetPrinter = null;
+    let selectionReason = '';
+
+    // Level 1: System Default (if physical)
+    // This allows the user to switch between any printer (KPOS or HP) via OS settings
+    targetPrinter = printers.find(p => p.isDefault && isPhysical(p));
+    if (targetPrinter) selectionReason = 'System default (Physical device)';
+
+    // Level 2: Exact match for "KPOS Printer" (as a strong fallback)
+    if (!targetPrinter) {
+      targetPrinter = printers.find(p => p.name.toLowerCase() === 'kpos printer');
+      if (targetPrinter) selectionReason = 'Exact match for "KPOS Printer" found (not default)';
+    }
+
+    // Level 3: Keyboard match (KPOS, Thermal, POS, 80mm)
+    if (!targetPrinter) {
+      const thermalKeywords = ['kpos', 'thermal', 'pos', '80mm'];
+      targetPrinter = printers.find(p => {
+        const name = p.name.toLowerCase();
+        return isPhysical(p) && thermalKeywords.some(kw => name.includes(kw));
+      });
+      if (targetPrinter) selectionReason = 'Keyword match (Thermal/POS) found';
+    }
+
+    // Level 4: First available Physical Printer
+    if (!targetPrinter) {
+      targetPrinter = printers.find(isPhysical);
+      if (targetPrinter) selectionReason = 'First non-virtual physical printer fallback';
+    }
+
+    // 4. Handle "No Printer" state
+    if (!targetPrinter) {
+      console.error('[Printing] FAILURE: No physical printer detected in inventory.');
+      return { success: false, error: 'NO_PHYSICAL_PRINTER' };
+    }
+
+    console.log(`[Printing] SELECTION: "${targetPrinter.name}" (Reason: ${selectionReason})`);
+
+    // 5. Create a hidden window for printing
+    let printWindow = new BrowserWindow({ 
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true
+      }
+    });
+
+    // 6. Execute SILENT printing
+    return new Promise((resolve) => {
+      // Use data URL to avoid file system delays
+      printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+      
+      printWindow.webContents.on('did-finish-load', async () => {
+        // Brief render delay for complex thermal templates
+        await new Promise(r => setTimeout(r, 600));
+
+        console.log(`[Printing] ATTEMPT: Sending silent print job to "${targetPrinter.name}"...`);
+        
+        printWindow.webContents.print({ 
+          silent: true, 
+          printBackground: true, 
+          deviceName: targetPrinter.name 
+        }, (success, failureReason) => {
+          if (!success) {
+            console.error(`[Printing] FAILURE: Print job failed. Reason: ${failureReason}`);
+            resolve({ success: false, error: failureReason });
+          } else {
+            console.log(`[Printing] SUCCESS: Job sent to "${targetPrinter.name}" successfully.`);
+            resolve({ success: true });
+          }
+          
+          if (printWindow) {
+            printWindow.close();
+            printWindow = null;
+          }
+        });
+      });
+    });
+
+  } catch (err) {
+    console.error('[Printing] CRITICAL ERROR in handler:', err);
+    return { success: false, error: err.message };
+  }
 // IPC handler for silent printing — returns { success, error } to renderer
 ipcMain.handle('silent-print', async (event, htmlContent) => {
   console.log('[electron] Received silent-print request');
