@@ -179,6 +179,53 @@ body::before {
   display: block;
 }
 
+body[data-current-view="account"] .container,
+body[data-current-view="print-receipt"] .container,
+body[data-current-view="receipt-selection"] .container {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+body[data-current-view="account"] #view-account.view.active,
+body[data-current-view="print-receipt"] #view-print-receipt.view.active,
+body[data-current-view="receipt-selection"] #view-receipt-selection.view.active {
+  flex: 1 1 auto;
+  min-height: calc(100vh - 250px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 0.75rem 0 1rem;
+  animation: none;
+}
+
+body[data-current-view="account"] #account-login-screen,
+body[data-current-view="account"] #account-dashboard {
+  width: min(640px, 100%);
+  height: auto !important;
+  margin: 0 auto !important;
+}
+
+body[data-current-view="account"] #account-dashboard {
+  padding: 0 !important;
+}
+
+body[data-current-view="print-receipt"] #view-print-receipt .form-container {
+  width: min(520px, 100%);
+  margin: 0 auto;
+}
+
+body[data-current-view="account"] .powered-by-footer,
+body[data-current-view="print-receipt"] .powered-by-footer {
+  position: fixed;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  margin: 0;
+  z-index: 20;
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -519,6 +566,8 @@ body::before {
   top: 2rem;
   left: 50%;
   transform: translateX(-50%) translateY(-150%);
+  opacity: 0;
+  visibility: hidden;
   background: var(--error);
   color: var(--white);
   padding: 1rem 2rem;
@@ -531,6 +580,8 @@ body::before {
 
 .error-message.show {
   transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  visibility: visible;
 }
 
 /* ============================================
@@ -802,6 +853,12 @@ body::before {
   box-shadow: 0 0 0 5px rgba(14, 165, 233, 0.12);
 }
 
+.co-patron-input:-moz-read-only,
+.co-patron-input:read-only {
+  caret-color: transparent;
+  cursor: default;
+}
+
 .co-patron-status {
   margin-top: 0.75rem;
   padding: 0.6rem 1rem;
@@ -851,7 +908,9 @@ body::before {
   border: 1px solid #e2e8f0;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.07);
   overflow: hidden;
-  min-height: 520px;
+  min-height: 400px;
+  max-width: 600px;
+  margin: 3rem auto;
 }
 
 .co-books-header {
@@ -1231,4 +1290,150 @@ body::before {
 @keyframes coOverlaySlideIn {
   from { transform: translateY(80px); opacity: 0; }
   to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* ============================================
+   GLOBAL: Prevent horizontal overflow on all pages
+   ============================================ */
+html {
+  overflow-x: hidden;
+  width: 100%;
+}
+
+body {
+  overflow-x: hidden;
+  width: 100%;
+  max-width: 100%;
+}
+
+/* ============================================
+   Scan Patron Card — Full-Viewport, No-Scroll,
+   Scaled-Up Layout
+   ============================================ */
+
+/* Lock viewport: no scroll at all on this page */
+body[data-current-view="checkout-scan-patron"] {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Container becomes a flex column that fills viewport */
+body[data-current-view="checkout-scan-patron"] .container {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100vh;
+  max-height: 100dvh;
+  overflow: hidden;
+  padding-bottom: 0 !important;
+}
+
+/* Header stays compact */
+body[data-current-view="checkout-scan-patron"] .header {
+  flex-shrink: 0;
+}
+
+/* Footer stays at bottom, no extra margin */
+body[data-current-view="checkout-scan-patron"] .powered-by-footer {
+  flex-shrink: 0;
+  margin: 0 auto;
+  padding: 0.35rem 0;
+}
+
+/* The view itself fills all remaining space */
+body[data-current-view="checkout-scan-patron"] #view-checkout-scan-patron.view.active {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Wrapper: fill parent, distribute content evenly, no hardcoded min-height */
+body[data-current-view="checkout-scan-patron"] .co-scan-patron-wrapper {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-evenly;
+  text-align: center;
+  padding: clamp(0.5rem, 1.5vh, 1.5rem) clamp(1rem, 3vw, 2rem);
+  overflow: hidden;
+}
+
+/* ── Scaled-Up Typography & Controls ────────────────────── */
+
+/* Session tag — bigger */
+body[data-current-view="checkout-scan-patron"] .co-session-tag {
+  font-size: clamp(0.85rem, 1.2vw, 1.05rem);
+  padding: clamp(0.4rem, 0.8vh, 0.65rem) clamp(1.4rem, 3vw, 2.2rem);
+  letter-spacing: 3px;
+  margin-bottom: 0;
+}
+
+/* Card icon — bigger */
+body[data-current-view="checkout-scan-patron"] .co-card-icon {
+  font-size: clamp(5rem, 10vh, 8rem);
+  margin-bottom: 0;
+}
+
+/* Main heading — much bigger */
+body[data-current-view="checkout-scan-patron"] .co-patron-heading {
+  font-size: clamp(2.4rem, 5vw, 3.6rem);
+  margin-bottom: clamp(0.35rem, 0.8vh, 0.75rem);
+}
+
+/* Instruction text — bigger */
+body[data-current-view="checkout-scan-patron"] .co-patron-instruction {
+  font-size: clamp(1.15rem, 2vw, 1.5rem);
+  max-width: 580px;
+  margin-bottom: 0;
+  line-height: 1.5;
+}
+
+/* Input group — wider, bigger */
+body[data-current-view="checkout-scan-patron"] .co-patron-input-group {
+  max-width: clamp(440px, 50vw, 580px);
+  width: 100%;
+  margin-bottom: 0;
+}
+
+body[data-current-view="checkout-scan-patron"] .co-patron-input {
+  font-size: clamp(1.5rem, 2.8vw, 2rem);
+  padding: clamp(1rem, 1.8vh, 1.5rem) clamp(1.5rem, 2vw, 2rem);
+  border-radius: 18px;
+  letter-spacing: 4px;
+}
+
+/* RFID status — bigger */
+body[data-current-view="checkout-scan-patron"] .co-patron-status {
+  font-size: clamp(0.9rem, 1.4vw, 1.1rem);
+  padding: clamp(0.5rem, 1vh, 0.85rem) clamp(1rem, 2vw, 1.5rem);
+  border-radius: 12px;
+  margin-top: clamp(0.5rem, 1vh, 0.85rem);
+}
+
+/* Button row — wider, taller buttons */
+body[data-current-view="checkout-scan-patron"] .co-scan-patron-wrapper > div[style*="display: flex"][style*="gap"] {
+  max-width: clamp(480px, 50vw, 580px);
+  width: 100%;
+  margin-top: 0;
+}
+
+body[data-current-view="checkout-scan-patron"] .co-btn-cancel,
+body[data-current-view="checkout-scan-patron"] .co-continue-btn {
+  font-size: clamp(1.1rem, 1.8vw, 1.4rem) !important;
+  padding: clamp(1rem, 2vh, 1.6rem) clamp(1.25rem, 2vw, 2rem) !important;
+  border-radius: 14px !important;
+}
+
+/* Demo hint — bigger */
+body[data-current-view="checkout-scan-patron"] .co-demo-hint {
+  font-size: clamp(0.9rem, 1.3vw, 1.1rem);
+  margin-top: 0;
 }

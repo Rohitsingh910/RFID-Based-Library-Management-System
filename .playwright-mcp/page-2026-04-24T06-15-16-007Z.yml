@@ -1,0 +1,33 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - img "University Logo" [ref=e3]
+    - heading "Punjabi University" [level=1] [ref=e4]
+    - paragraph [ref=e5]: Smart Library Kiosk • Experience Excellence
+  - generic [ref=e8]:
+    - banner [ref=e9]:
+      - img "University Logo" [ref=e10]
+    - generic [ref=e11]:
+      - generic [ref=e12]:
+        - heading "Welcome to Punjabi University" [level=1] [ref=e13]:
+          - text: Welcome to
+          - generic [ref=e14]: Punjabi University
+        - paragraph [ref=e15]: Your gateway to knowledge • Tap a service to begin
+      - generic [ref=e16]:
+        - generic [ref=e17] [cursor=pointer]:
+          - generic [ref=e18]: 📕
+          - generic [ref=e19]: Check-Out
+          - generic [ref=e20]: Borrow items instantly
+        - generic [ref=e21] [cursor=pointer]:
+          - generic [ref=e22]: 📚
+          - generic [ref=e23]: Check-In
+          - generic [ref=e24]: Return books safely
+        - generic [ref=e25] [cursor=pointer]:
+          - generic [ref=e26]: 👤
+          - generic [ref=e27]: My Account
+          - generic [ref=e28]: Manage loans & fines
+        - generic [ref=e29] [cursor=pointer]:
+          - generic [ref=e30]: 🔄
+          - generic [ref=e31]: Renew
+          - generic [ref=e32]: Extend your loan period
+    - text: 📚
+  - generic [ref=e33]: ⚛ Powered by SoCTeamup Semiconductors

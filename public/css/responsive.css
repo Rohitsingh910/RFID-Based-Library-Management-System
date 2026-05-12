@@ -1,0 +1,903 @@
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE AUTO-SCALING — Professional Kiosk Mode
+   Makes the entire UI auto-adjust for ANY screen size.
+   Uses viewport units (vh, vw, vmin) + clamp() for fluid scaling.
+   Load this file LAST — it overrides fixed values with fluid ones.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Root: Viewport-Relative Design Tokens ─────────────────── */
+:root {
+  /* Fluid spacing scale based on viewport */
+  --sp-xs: clamp(0.2rem, 0.5vmin, 0.4rem);
+  --sp-sm: clamp(0.4rem, 1vmin, 0.8rem);
+  --sp-md: clamp(0.75rem, 1.5vmin, 1.25rem);
+  --sp-lg: clamp(1rem, 2.5vmin, 2rem);
+  --sp-xl: clamp(1.5rem, 3.5vmin, 3rem);
+  --sp-2xl: clamp(2rem, 5vmin, 4rem);
+
+  /* Fluid font sizes */
+  --fs-xs: clamp(0.7rem, 1.2vmin, 0.85rem);
+  --fs-sm: clamp(0.8rem, 1.5vmin, 1rem);
+  --fs-md: clamp(0.9rem, 1.8vmin, 1.15rem);
+  --fs-lg: clamp(1.1rem, 2.2vmin, 1.5rem);
+  --fs-xl: clamp(1.4rem, 3vmin, 2rem);
+  --fs-2xl: clamp(1.8rem, 4vmin, 3rem);
+  --fs-3xl: clamp(2.2rem, 5vmin, 4rem);
+
+  /* Fluid radius */
+  --r-sm: clamp(6px, 1vmin, 10px);
+  --r-md: clamp(10px, 1.5vmin, 16px);
+  --r-lg: clamp(14px, 2vmin, 24px);
+  --r-xl: clamp(18px, 2.5vmin, 28px);
+
+  /* Fluid container width */
+  --container-max: min(1160px, 92vw);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   GLOBAL LAYOUT
+   ═══════════════════════════════════════════════════════════════ */
+
+html, body {
+  height: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  font-size: clamp(14px, 1.6vmin, 18px);
+}
+
+.container {
+  max-width: var(--container-max) !important;
+  padding: var(--sp-md) var(--sp-lg) var(--sp-sm) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   HEADER — Fluid
+   ═══════════════════════════════════════════════════════════════ */
+
+.header {
+  padding: clamp(0.5rem, 1.2vh, 1rem) clamp(0.8rem, 2vw, 1.4rem) !important;
+  margin-bottom: clamp(0.5rem, 1.5vh, 1.4rem) !important;
+  border-radius: var(--r-md) !important;
+}
+
+.logo {
+  height: clamp(32px, 5.5vh, 60px) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   SPLASH SCREEN — Fluid
+   ═══════════════════════════════════════════════════════════════ */
+
+.splash-logo {
+  width: clamp(100px, 18vmin, 220px) !important;
+  margin-bottom: clamp(1rem, 3vh, 2.5rem) !important;
+}
+
+.splash-title {
+  font-size: clamp(1.6rem, 5vmin, 3.2rem) !important;
+}
+
+.splash-subtitle {
+  font-size: clamp(0.85rem, 2vmin, 1.3rem) !important;
+  margin-bottom: clamp(1.5rem, 4vh, 4rem) !important;
+}
+
+.splash-loader {
+  width: clamp(180px, 30vw, 350px) !important;
+  height: clamp(4px, 0.7vh, 7px) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   HOME VIEW — Welcome + Button Grid (Fluid)
+   ═══════════════════════════════════════════════════════════════ */
+
+.welcome-container {
+  margin-bottom: clamp(1rem, 4vh, 4rem) !important;
+}
+
+.welcome-title {
+  font-size: clamp(1.6rem, 5vh, 4.2rem) !important;
+  letter-spacing: -0.02em !important;
+}
+
+.welcome-subtitle {
+  font-size: clamp(0.8rem, 2vmin, 1.25rem) !important;
+  margin-top: clamp(0.2rem, 0.8vh, 0.75rem) !important;
+}
+
+.button-grid {
+  width: min(calc(min(65vh, 92vw)), 780px) !important;
+  max-width: 94vw !important;
+  gap: clamp(1rem, 2.5vh, 2.5rem) !important;
+  margin: 0 auto !important;
+}
+
+.feature-button {
+  padding: clamp(1.5rem, 4vh, 3.5rem) clamp(1rem, 2vw, 2.5rem) !important;
+  border-radius: var(--r-lg) !important;
+}
+
+.feature-icon {
+  font-size: clamp(2rem, 5.5vmin, 4rem) !important;
+  margin-bottom: clamp(0.3rem, 0.8vmin, 0.9rem) !important;
+}
+
+.feature-label {
+  font-size: clamp(0.85rem, 1.8vmin, 1.25rem) !important;
+}
+
+.feature-desc {
+  font-size: clamp(0.72rem, 1.3vmin, 1rem) !important;
+  margin-top: clamp(0.15rem, 0.3vmin, 0.3rem) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   POWERED BY FOOTER — Fluid
+   ═══════════════════════════════════════════════════════════════ */
+
+.powered-by-footer {
+  font-size: clamp(0.75rem, 1.2vmin, 0.9rem) !important;
+  margin: clamp(0.5rem, 2vh, 2.5rem) auto clamp(0.5rem, 1.5vh, 1.5rem) auto !important;
+  padding-bottom: 0.5rem !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   CHECK-OUT: SCAN PATRON CARD — Fluid (enhances patron-scan-fix)
+   ═══════════════════════════════════════════════════════════════ */
+
+body[data-current-view="checkout-scan-patron"] .co-session-tag {
+  font-size: clamp(0.72rem, 1.4vmin, 1.05rem) !important;
+  padding: clamp(0.35rem, 0.8vh, 0.7rem) clamp(1.2rem, 3vw, 2.5rem) !important;
+}
+
+body[data-current-view="checkout-scan-patron"] .co-card-icon {
+  font-size: clamp(3.5rem, 10vmin, 8rem) !important;
+}
+
+body[data-current-view="checkout-scan-patron"] .co-patron-heading {
+  font-size: clamp(1.8rem, 5vh, 4rem) !important;
+}
+
+body[data-current-view="checkout-scan-patron"] .co-patron-instruction {
+  font-size: clamp(0.9rem, 2vmin, 1.5rem) !important;
+  max-width: min(640px, 80vw) !important;
+}
+
+body[data-current-view="checkout-scan-patron"] .co-patron-input {
+  font-size: clamp(1.2rem, 2.8vmin, 2.2rem) !important;
+  padding: clamp(0.8rem, 1.8vh, 1.5rem) clamp(1rem, 2vw, 2rem) !important;
+}
+
+body[data-current-view="checkout-scan-patron"] .co-patron-status {
+  font-size: clamp(0.78rem, 1.3vmin, 1.1rem) !important;
+}
+
+body[data-current-view="checkout-scan-patron"] .co-demo-hint {
+  font-size: clamp(0.75rem, 1.2vmin, 1rem) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   CHECK-OUT: SCAN BOOKS — Fluid
+   ═══════════════════════════════════════════════════════════════ */
+
+.co-books-wrapper {
+  max-width: min(600px, 90vw) !important;
+  border-radius: var(--r-lg) !important;
+  margin: clamp(0.5rem, 2vh, 3rem) auto !important;
+}
+
+.co-books-header {
+  padding: clamp(0.75rem, 1.5vh, 1.25rem) clamp(1rem, 2vw, 1.75rem) !important;
+}
+
+.co-books-title {
+  font-size: clamp(1.1rem, 2.5vmin, 1.6rem) !important;
+}
+
+.co-books-patron {
+  font-size: clamp(0.75rem, 1.3vmin, 0.9rem) !important;
+}
+
+.co-items-badge {
+  font-size: clamp(0.8rem, 1.4vmin, 1rem) !important;
+  padding: clamp(0.35rem, 0.7vh, 0.55rem) clamp(0.8rem, 1.5vw, 1.4rem) !important;
+}
+
+.co-book-list {
+  padding: clamp(0.5rem, 1vh, 1rem) clamp(0.75rem, 1.5vw, 1.25rem) !important;
+  min-height: clamp(200px, 35vh, 380px) !important;
+  max-height: clamp(250px, 45vh, 420px) !important;
+}
+
+.co-scan-prompt {
+  padding: clamp(1.5rem, 3vh, 3rem) clamp(0.5rem, 1vw, 1rem) !important;
+}
+
+.co-scan-rings {
+  width: clamp(60px, 10vmin, 100px) !important;
+  height: clamp(60px, 10vmin, 100px) !important;
+}
+
+.co-ring-icon {
+  font-size: clamp(1rem, 2vmin, 1.5rem) !important;
+}
+
+.co-scan-prompt-text {
+  font-size: clamp(0.85rem, 1.5vmin, 1.05rem) !important;
+}
+
+/* Book rows */
+.co-book-row {
+  padding: clamp(0.5rem, 1vh, 0.9rem) clamp(0.6rem, 1.2vw, 1rem) !important;
+  border-radius: var(--r-md) !important;
+}
+
+.co-book-title {
+  font-size: clamp(0.8rem, 1.4vmin, 0.95rem) !important;
+}
+
+.co-book-status {
+  font-size: clamp(0.68rem, 1.1vmin, 0.8rem) !important;
+}
+
+.co-book-due {
+  font-size: clamp(0.72rem, 1.2vmin, 0.85rem) !important;
+}
+
+/* Action buttons */
+.co-action-buttons {
+  padding: clamp(0.75rem, 1.2vh, 1.25rem) clamp(0.75rem, 1.5vw, 1.5rem) !important;
+}
+
+.co-btn-account,
+.co-btn-finish {
+  padding: clamp(0.6rem, 1.2vh, 1rem) !important;
+  font-size: clamp(0.85rem, 1.5vmin, 1rem) !important;
+  border-radius: var(--r-md) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   ACCOUNT LOADING TRANSITION — Fluid
+   ═══════════════════════════════════════════════════════════════ */
+
+.co-loading-wrapper {
+  min-height: clamp(50vh, 65vh, 80vh) !important;
+  padding: var(--sp-lg) !important;
+  border-radius: var(--r-lg) !important;
+}
+
+.co-loading-orb {
+  width: clamp(80px, 14vmin, 130px) !important;
+  height: clamp(80px, 14vmin, 130px) !important;
+  margin-bottom: clamp(1rem, 2.5vh, 2.5rem) !important;
+}
+
+.co-loading-title {
+  font-size: clamp(1.2rem, 3vmin, 1.85rem) !important;
+}
+
+.co-loading-subtitle {
+  font-size: clamp(0.8rem, 1.5vmin, 1rem) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   CHECK-IN — Fluid
+   ═══════════════════════════════════════════════════════════════ */
+
+.checkin-wrapper {
+  max-width: min(900px, 92vw) !important;
+  padding: clamp(0.75rem, 2vh, 2rem) !important;
+}
+
+.page-title {
+  font-size: clamp(1.6rem, 4vmin, 3rem) !important;
+  margin-bottom: clamp(1rem, 2.5vh, 2.5rem) !important;
+}
+
+.place-book-anim {
+  padding: clamp(2.5rem, 8vh, 6rem) clamp(2rem, 5vw, 4rem) !important;
+  border-radius: var(--r-xl) !important;
+  margin-bottom: clamp(1rem, 3vh, 3rem) !important;
+  width: min(650px, 90vw) !important;
+}
+
+.place-book-icon {
+  font-size: clamp(3.5rem, 10vmin, 7rem) !important;
+}
+
+.place-book-text {
+  font-size: clamp(1rem, 2.5vmin, 2rem) !important;
+  margin-top: clamp(1rem, 2.5vh, 2.5rem) !important;
+}
+
+.scanning-anim {
+  width: clamp(70px, 12vmin, 120px) !important;
+  height: clamp(70px, 12vmin, 120px) !important;
+}
+
+.scan-icon {
+  font-size: clamp(1.5rem, 3.5vmin, 3rem) !important;
+}
+
+.scanning-text {
+  font-size: clamp(1rem, 2.2vmin, 1.5rem) !important;
+}
+
+/* Result cards */
+.result-card {
+  padding: clamp(0.6rem, 1.2vh, 1rem) clamp(0.75rem, 1.5vw, 1.2rem) !important;
+  border-radius: var(--r-md) !important;
+}
+
+.result-card .status-icon {
+  width: clamp(32px, 5vmin, 44px) !important;
+  height: clamp(32px, 5vmin, 44px) !important;
+  border-radius: var(--r-md) !important;
+  font-size: clamp(1rem, 1.8vmin, 1.3rem) !important;
+}
+
+.result-card .card-title {
+  font-size: clamp(0.82rem, 1.4vmin, 1rem) !important;
+}
+
+.result-card .card-status {
+  font-size: clamp(0.7rem, 1.1vmin, 0.82rem) !important;
+}
+
+.result-card .card-time {
+  font-size: clamp(0.65rem, 1vmin, 0.78rem) !important;
+}
+
+/* Check-in step container */
+.checkin-step {
+  gap: clamp(0.75rem, 2vh, 2rem) !important;
+  margin-bottom: clamp(0.75rem, 2vh, 2rem) !important;
+}
+
+/* Buttons in check-in */
+.btn-finish, 
+.btn-large {
+  font-size: clamp(1.1rem, 2.5vmin, 1.5rem) !important;
+  padding: clamp(1rem, 2vh, 1.5rem) clamp(2rem, 5vw, 5rem) !important;
+  border-radius: clamp(30px, 10vmin, 100px) !important;
+}
+
+.btn-secondary {
+  font-size: clamp(0.9rem, 2vmin, 1.15rem) !important;
+  padding: clamp(0.6rem, 1.2vh, 1rem) clamp(1.5rem, 4vw, 3rem) !important;
+  border-radius: var(--r-md) !important;
+  /* Reset any floating/absolute position */
+  position: static !important;
+  margin-top: clamp(0.5rem, 1vh, 1.5rem) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   MY ACCOUNT VIEW — Fluid
+   ═══════════════════════════════════════════════════════════════ */
+
+#account-login-screen > div {
+  padding: clamp(1.5rem, 3vh, 2.5rem) clamp(1.5rem, 3vw, 3rem) !important;
+  border-radius: var(--r-lg) !important;
+  max-width: min(480px, 88vw) !important;
+}
+
+#account-login-screen h1 {
+  font-size: clamp(1.2rem, 2.8vmin, 1.8rem) !important;
+}
+
+#account-login-screen p {
+  font-size: clamp(0.82rem, 1.4vmin, 1.05rem) !important;
+}
+
+#account-login-screen img {
+  max-width: min(320px, 70vw) !important;
+}
+
+#account-reader-status {
+  font-size: clamp(0.82rem, 1.4vmin, 1rem) !important;
+}
+
+/* Account dashboard */
+.account-summary {
+  padding: clamp(0.75rem, 1.5vh, 1.5rem) !important;
+  border-radius: var(--r-md) !important;
+}
+
+.account-summary-header h2 {
+  font-size: clamp(1rem, 2.2vmin, 1.5rem) !important;
+}
+
+.account-fine {
+  padding: clamp(0.5rem, 1vh, 0.85rem) clamp(0.6rem, 1.2vw, 1rem) !important;
+  border-radius: var(--r-md) !important;
+  font-size: clamp(0.8rem, 1.3vmin, 1rem) !important;
+}
+
+.account-section-title {
+  font-size: clamp(0.82rem, 1.4vmin, 1rem) !important;
+}
+
+.account-loan-card {
+  padding: clamp(0.6rem, 1.2vh, 1rem) !important;
+  border-radius: var(--r-md) !important;
+}
+
+.account-loan-title {
+  font-size: clamp(0.82rem, 1.4vmin, 1rem) !important;
+}
+
+.account-loan-meta {
+  font-size: clamp(0.72rem, 1.2vmin, 0.95rem) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   THANK YOU VIEW — Fluid
+   ═══════════════════════════════════════════════════════════════ */
+
+.thankyou-container {
+  min-height: clamp(50vh, 65vh, 80vh) !important;
+  padding: clamp(1rem, 3vh, 3rem) !important;
+}
+
+.book-3d-scene {
+  width: clamp(70px, 12vmin, 120px) !important;
+  height: clamp(93px, 16vmin, 160px) !important;
+  margin-bottom: clamp(1rem, 3vh, 3rem) !important;
+}
+
+.thankyou-title {
+  font-size: clamp(2rem, 5vmin, 4rem) !important;
+  margin-bottom: clamp(0.5rem, 1vh, 1rem) !important;
+}
+
+.thankyou-message {
+  font-size: clamp(0.9rem, 1.8vmin, 1.2rem) !important;
+}
+
+.count-badge {
+  font-size: clamp(1rem, 2vmin, 1.5rem) !important;
+}
+
+.quote-container {
+  margin-top: clamp(0.5rem, 1.5vh, 1.5rem) !important;
+}
+
+.quote-text {
+  font-size: clamp(0.85rem, 1.6vmin, 1.15rem) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   RENEW MODULE — Fluid
+   ═══════════════════════════════════════════════════════════════ */
+
+.renew-page-title {
+  font-size: clamp(1.2rem, 2.8vmin, 1.85rem) !important;
+}
+
+.renew-home-btn {
+  font-size: clamp(0.72rem, 1.2vmin, 0.88rem) !important;
+  padding: clamp(0.3rem, 0.6vh, 0.45rem) clamp(0.6rem, 1.2vw, 1rem) !important;
+}
+
+/* Renew scan card */
+.renew-scan-wrapper {
+  max-width: min(500px, 88vw) !important;
+}
+
+.renew-scan-card {
+  border-radius: var(--r-xl) !important;
+  padding: clamp(1.5rem, 4vh, 3.5rem) clamp(1rem, 3vw, 2.5rem) !important;
+}
+
+.renew-card-anim {
+  width: clamp(80px, 14vmin, 130px) !important;
+  height: clamp(80px, 14vmin, 130px) !important;
+  margin: 0 auto clamp(1rem, 2vh, 2rem) !important;
+}
+
+.renew-card-icon {
+  font-size: clamp(2.2rem, 5vmin, 3.8rem) !important;
+}
+
+.renew-scan-instruction {
+  font-size: clamp(0.9rem, 1.6vmin, 1.15rem) !important;
+  margin-bottom: clamp(0.75rem, 1.5vh, 1.5rem) !important;
+}
+
+.renew-rfid-status {
+  font-size: clamp(0.72rem, 1.2vmin, 0.85rem) !important;
+  padding: clamp(0.4rem, 0.8vh, 0.65rem) clamp(0.6rem, 1.2vw, 1rem) !important;
+}
+
+/* Renew connecting */
+.renew-spinner-ring {
+  width: clamp(48px, 8vmin, 76px) !important;
+  height: clamp(48px, 8vmin, 76px) !important;
+}
+
+.renew-connecting-text {
+  font-size: clamp(0.95rem, 2vmin, 1.25rem) !important;
+}
+
+/* Renew items */
+.renew-items-wrapper {
+  max-width: min(720px, 92vw) !important;
+}
+
+.renew-section {
+  border-radius: var(--r-lg) !important;
+}
+
+.renew-section-header {
+  padding: clamp(0.5rem, 1vh, 0.85rem) clamp(0.75rem, 1.5vw, 1.25rem) !important;
+}
+
+.renew-section-label {
+  font-size: clamp(0.68rem, 1.1vmin, 0.82rem) !important;
+}
+
+.renew-item-row {
+  padding: clamp(0.5rem, 1vh, 0.9rem) clamp(0.75rem, 1.5vw, 1.25rem) !important;
+}
+
+.renew-item-title {
+  font-size: clamp(0.78rem, 1.3vmin, 0.94rem) !important;
+}
+
+.renew-item-meta {
+  font-size: clamp(0.68rem, 1.1vmin, 0.8rem) !important;
+}
+
+.renew-btn-primary {
+  padding: clamp(0.6rem, 1.2vh, 0.9rem) clamp(1.2rem, 2.5vw, 2.1rem) !important;
+  font-size: clamp(0.82rem, 1.5vmin, 1rem) !important;
+  border-radius: var(--r-md) !important;
+}
+
+.renew-btn-secondary {
+  padding: clamp(0.6rem, 1.2vh, 0.9rem) clamp(0.8rem, 2vw, 1.6rem) !important;
+  font-size: clamp(0.82rem, 1.5vmin, 1rem) !important;
+  border-radius: var(--r-md) !important;
+}
+
+/* Renew results */
+.renew-results-wrapper {
+  max-width: min(620px, 92vw) !important;
+}
+
+.renew-results-heading {
+  font-size: clamp(1.2rem, 2.5vmin, 1.75rem) !important;
+  margin-bottom: clamp(0.75rem, 1.5vh, 1.5rem) !important;
+}
+
+.renew-result-row {
+  padding: clamp(0.6rem, 1.2vh, 1rem) clamp(0.7rem, 1.4vw, 1.15rem) !important;
+  border-radius: var(--r-md) !important;
+}
+
+.renew-result-icon {
+  font-size: clamp(1rem, 2vmin, 1.5rem) !important;
+}
+
+.renew-result-title {
+  font-size: clamp(0.78rem, 1.3vmin, 0.95rem) !important;
+}
+
+.renew-result-status {
+  font-size: clamp(0.68rem, 1.1vmin, 0.82rem) !important;
+}
+
+/* Renew receipt */
+.renew-receipt-wrapper {
+  max-width: min(540px, 90vw) !important;
+}
+
+.renew-receipt-subtitle {
+  font-size: clamp(0.82rem, 1.4vmin, 1rem) !important;
+  margin-bottom: clamp(0.75rem, 2vh, 2rem) !important;
+}
+
+.renew-receipt-grid {
+  gap: clamp(0.5rem, 1.2vmin, 1rem) !important;
+  margin-bottom: clamp(0.75rem, 1.5vh, 1.5rem) !important;
+}
+
+.renew-receipt-choice {
+  padding: clamp(1rem, 2.5vh, 2rem) clamp(0.75rem, 1.5vw, 1.25rem) !important;
+  border-radius: var(--r-xl) !important;
+}
+
+.receipt-choice-icon {
+  font-size: clamp(1.5rem, 3.5vmin, 2.4rem) !important;
+}
+
+.receipt-choice-label {
+  font-size: clamp(0.72rem, 1.2vmin, 0.9rem) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   PRINT RECEIPT VIEW — Fluid
+   ═══════════════════════════════════════════════════════════════ */
+
+.form-container {
+  padding: clamp(1.5rem, 3vh, 3rem) !important;
+  border-radius: var(--r-md) !important;
+  max-width: min(500px, 88vw) !important;
+}
+
+.form-title {
+  font-size: clamp(1.2rem, 2.5vmin, 1.75rem) !important;
+  margin-bottom: clamp(1rem, 2vh, 2rem) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   CHECK-OUT SUCCESS — Fluid
+   ═══════════════════════════════════════════════════════════════ */
+
+.success-container {
+  padding: clamp(1rem, 2vh, 2rem) !important;
+}
+
+.success-icon {
+  width: clamp(60px, 10vmin, 100px) !important;
+  height: clamp(60px, 10vmin, 100px) !important;
+  font-size: clamp(2rem, 4.5vmin, 3.5rem) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   CHECK-IN SUCCESS — Fluid
+   ═══════════════════════════════════════════════════════════════ */
+
+#view-checkin-success h1 {
+  font-size: clamp(1.5rem, 3.5vmin, 3rem) !important;
+}
+
+#view-checkin-success p {
+  font-size: clamp(0.9rem, 1.8vmin, 1.4rem) !important;
+}
+
+#view-checkin-success img {
+  max-height: clamp(120px, 25vh, 250px) !important;
+}
+
+#view-checkin-success .btn,
+#btn-final-done {
+  padding: clamp(0.6rem, 1.2vh, 1.2rem) clamp(1.5rem, 4vw, 4rem) !important;
+  font-size: clamp(0.9rem, 1.6vmin, 1.2rem) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   OFFLINE SCREEN — Fluid
+   ═══════════════════════════════════════════════════════════════ */
+
+.offline-icon {
+  font-size: clamp(3rem, 7vmin, 6rem) !important;
+  margin-bottom: clamp(1rem, 2vh, 2rem) !important;
+}
+
+.offline-title {
+  font-size: clamp(1.5rem, 4vmin, 3rem) !important;
+}
+
+.offline-desc {
+  font-size: clamp(0.9rem, 1.8vmin, 1.3rem) !important;
+  max-width: min(600px, 80vw) !important;
+  margin-bottom: clamp(1rem, 2vh, 2rem) !important;
+}
+
+.status-indicators {
+  gap: clamp(0.75rem, 2vw, 2rem) !important;
+  margin-bottom: clamp(1.5rem, 3vh, 4rem) !important;
+}
+
+.status-item {
+  padding: clamp(0.75rem, 1.5vh, 1.5rem) !important;
+  border-radius: var(--r-lg) !important;
+  min-width: clamp(100px, 15vw, 160px) !important;
+}
+
+.btn-offline {
+  padding: clamp(0.75rem, 1.5vh, 1.2rem) clamp(1.5rem, 3vw, 3rem) !important;
+  font-size: clamp(0.9rem, 1.6vmin, 1.2rem) !important;
+  border-radius: var(--r-md) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   HOLD MODAL — Fluid
+   ═══════════════════════════════════════════════════════════════ */
+
+#hold-modal > div {
+  padding: clamp(1rem, 2.5vh, 2rem) !important;
+  border-radius: var(--r-md) !important;
+  max-width: min(420px, 90vw) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   GLOBAL BUTTONS — Fluid touch targets for kiosk
+   ═══════════════════════════════════════════════════════════════ */
+
+.btn {
+  padding: clamp(0.5rem, 1vh, 0.875rem) clamp(0.75rem, 1.5vw, 1.5rem) !important;
+  font-size: clamp(0.82rem, 1.5vmin, 1rem) !important;
+  border-radius: var(--r-md) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   TOAST & ERROR BAR — Fluid
+   ═══════════════════════════════════════════════════════════════ */
+
+.rfid-toast {
+  padding: clamp(0.5rem, 1vh, 1rem) clamp(0.75rem, 1.5vw, 1.5rem) !important;
+  border-radius: var(--r-md) !important;
+  font-size: clamp(0.8rem, 1.3vmin, 1rem) !important;
+}
+
+.error-message {
+  padding: clamp(0.5rem, 1vh, 1rem) clamp(1rem, 2vw, 2rem) !important;
+  border-radius: var(--r-md) !important;
+  font-size: clamp(0.82rem, 1.4vmin, 1rem) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   QR CODE PANEL — Fluid
+   ═══════════════════════════════════════════════════════════════ */
+
+.qr-receipt-panel {
+  flex: 0 0 clamp(200px, 26vw, 280px) !important;
+  padding: clamp(1rem, 2vh, 1.75rem) clamp(0.75rem, 1.5vw, 1.25rem) !important;
+  border-radius: var(--r-xl) !important;
+}
+
+.qr-panel-title {
+  font-size: clamp(0.65rem, 1vmin, 0.78rem) !important;
+}
+
+.qr-idle-icon {
+  font-size: clamp(2rem, 4vmin, 3.2rem) !important;
+}
+
+.qr-cta-btn {
+  padding: clamp(0.5rem, 1vh, 0.9rem) clamp(0.75rem, 1.5vw, 1.25rem) !important;
+  font-size: clamp(0.78rem, 1.3vmin, 0.95rem) !important;
+  border-radius: var(--r-md) !important;
+}
+
+.qr-code-box {
+  min-width: clamp(160px, 22vmin, 230px) !important;
+  min-height: clamp(160px, 22vmin, 230px) !important;
+  padding: clamp(0.4rem, 0.8vmin, 0.75rem) !important;
+  border-radius: var(--r-md) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   FLOATING CHECKOUT BUTTON — Fluid
+   ═══════════════════════════════════════════════════════════════ */
+
+#btn-co-finish-overlay {
+  bottom: clamp(0.75rem, 2vh, 2rem) !important;
+  right: clamp(0.75rem, 2vw, 2rem) !important;
+  padding: clamp(0.6rem, 1.2vh, 1rem) clamp(1.2rem, 3vw, 2.75rem) !important;
+  font-size: clamp(0.85rem, 1.5vmin, 1.05rem) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   SCROLLBAR — Professional thin, with accent color
+   ═══════════════════════════════════════════════════════════════ */
+
+::-webkit-scrollbar {
+  width: clamp(4px, 0.5vmin, 7px);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(14, 165, 233, 0.25);
+  border-radius: 20px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(14, 165, 233, 0.45);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   VERY SMALL SCREENS (< 640px height) — Extra compactness
+   ═══════════════════════════════════════════════════════════════ */
+
+@media (max-height: 640px) {
+  .header {
+    padding: 0.35rem 0.7rem !important;
+    margin-bottom: 0.35rem !important;
+  }
+
+  .powered-by-footer {
+    font-size: 0.6rem !important;
+    margin: 1px auto 2px auto !important;
+  }
+
+  .welcome-container {
+    margin-bottom: 0.3rem !important;
+  }
+
+  .button-grid {
+    gap: 0.4rem !important;
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   VERY LARGE SCREENS (> 1600px width / > 900px height)
+   Scale up for large monitors / TVs
+   ═══════════════════════════════════════════════════════════════ */
+
+@media (min-width: 1600px) and (min-height: 900px) {
+  :root {
+    --container-max: min(1280px, 88vw);
+  }
+
+  .button-grid {
+    width: min(680px, 85vw) !important;
+    max-width: 680px !important;
+    gap: clamp(0.75rem, 1.2vmin, 1.2rem) !important;
+  }
+
+  .feature-button {
+    padding: clamp(1rem, 2vmin, 1.8rem) !important;
+  }
+  
+  .feature-icon {
+    font-size: clamp(3rem, 5vmin, 4.5rem) !important;
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   ULTRA-WIDE (21:9 or wider) — Constrain horizontal spread
+   ═══════════════════════════════════════════════════════════════ */
+
+@media (min-aspect-ratio: 21/9) {
+  :root {
+    --container-max: min(1100px, 60vw);
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   PORTRAIT MODE (e.g. kiosk in portrait orientation)
+   ═══════════════════════════════════════════════════════════════ */
+
+@media (orientation: portrait) {
+  .button-grid {
+    width: min(90vw, 500px) !important;
+  }
+  
+  .co-books-wrapper {
+    max-width: min(90vw, 550px) !important;
+  }
+}

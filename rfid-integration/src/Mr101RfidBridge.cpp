@@ -412,7 +412,7 @@ static bool rawReadMultipleBlocks(const string& uidHex, int startBlock, int bloc
     for (int blockIndex = 0; blockIndex < returnedBlockCount; blockIndex++) {
         int offset = 2 + blockIndex * bytesPerRecord + (blockStatusPresent ? 1 : 0);
         for (int byteIndex = 0; byteIndex < returnedBlockSize; byteIndex++) {
-            int sourceIndex = offset + (returnedBlockSize - 1 - byteIndex);
+            int sourceIndex = offset + byteIndex;
             if (sourceIndex >= static_cast<int>(response.payload.size())) {
                 failReason = "Block data truncated";
                 return false;
@@ -937,13 +937,19 @@ static void runReaderLoop() {
         return;
     }
 
-    FEUSB_ClearScanList();
-    FEUSB_Scan(FEUSB_SCAN_ALL, nullptr);
+    FE_USB_INIT_LOOP:
+    while (serverRunning.load()) {
+        FEUSB_ClearScanList();
+        FEUSB_Scan(FEUSB_SCAN_ALL, nullptr);
 
-    int count = FEUSB_GetScanListSize();
-    if (count <= 0) {
-        lastReaderError = "No FEIG reader found on USB.";
-        cout << "[rfid-bridge] " << lastReaderError << endl;
+        int count = FEUSB_GetScanListSize();
+        if (count > 0) break;
+
+        lastReaderError = "No FEIG reader found on USB. Retrying...";
+        this_thread::sleep_for(chrono::milliseconds(2000));
+    }
+
+    if (!serverRunning.load()) {
         FreeLibrary(hDLL);
         return;
     }
@@ -954,10 +960,10 @@ static void runReaderLoop() {
 
     g_deviceHandle = FEUSB_OpenDevice(deviceId);
     if (g_deviceHandle <= 0) {
-        lastReaderError = "FEUSB_OpenDevice failed!";
+        lastReaderError = "FEUSB_OpenDevice failed! Retrying...";
         cout << "[rfid-bridge] " << lastReaderError << endl;
-        FreeLibrary(hDLL);
-        return;
+        this_thread::sleep_for(chrono::milliseconds(2000));
+        goto FE_USB_INIT_LOOP;
     }
 
     readerConnected = true;
@@ -976,8 +982,23 @@ static void runReaderLoop() {
                     discoveredUids = getInventorySnapshot(failReason);
                 }
 
-                if (!failReason.empty()) lastReaderError = failReason;
-                else lastReaderError.clear();
+                if (!failReason.empty()) {
+                    lastReaderError = failReason;
+                    // If error indicates a lost handle/disconnection, trigger re-init
+                    if (failReason.find("Device not open") != string::npos || 
+                        failReason.find("Disconnected") != string::npos ||
+                        failReason.find("FEUSB error -") != string::npos) {
+                        
+                        cout << "[rfid-bridge] Critical hardware error detected: " << failReason << ". Re-initializing..." << endl;
+                        readerConnected = false;
+                        FEUSB_CloseDevice(g_deviceHandle);
+                        g_deviceHandle = 0;
+                        this_thread::sleep_for(chrono::milliseconds(1000));
+                        goto FE_USB_INIT_LOOP;
+                    }
+                } else {
+                    lastReaderError.clear();
+                }
 
                 for (const string& uid : discoveredUids) {
                     {

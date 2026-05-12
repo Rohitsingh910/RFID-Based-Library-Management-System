@@ -1,0 +1,389 @@
+/* ============================================
+   GLOBAL: Prevent horizontal overflow on all pages
+   ============================================ */
+html {
+  overflow-x: hidden !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+body {
+  overflow-x: hidden !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 100% !important;
+}
+
+/* ============================================
+   Scan Patron Card — Full-Viewport, No-Scroll,
+   Scaled-Up Layout (vh-based scaling)
+   ============================================ */
+
+/* Lock viewport: no scroll at all on this page */
+body[data-current-view="checkout-scan-patron"] {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Container becomes a flex column filling viewport */
+body[data-current-view="checkout-scan-patron"] .container {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100vh;
+  max-height: 100dvh;
+  overflow: hidden;
+  padding-bottom: 0 !important;
+}
+
+/* Header stays compact */
+body[data-current-view="checkout-scan-patron"] .header {
+  flex-shrink: 0;
+}
+
+/* Footer at bottom, minimal space */
+body[data-current-view="checkout-scan-patron"] .powered-by-footer {
+  flex-shrink: 0;
+  margin: 0 auto;
+  padding: clamp(0.2rem, 0.5vh, 0.4rem) 0;
+  font-size: clamp(0.8rem, 1.2vh, 0.95rem);
+}
+
+/* View fills all remaining space */
+body[data-current-view="checkout-scan-patron"] #view-checkout-scan-patron.view.active {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Wrapper: CSS Grid — rows fill viewport ────────────── */
+body[data-current-view="checkout-scan-patron"] .co-scan-patron-wrapper {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  width: 100% !important;
+  display: grid !important;
+  grid-template-rows:
+    auto          /* session tag */
+    1fr           /* card icon — grows to eat top gap */
+    auto          /* heading */
+    auto          /* instruction */
+    auto          /* input group */
+    auto          /* button row */
+    auto          /* demo hint */ !important;
+  align-content: center !important;
+  justify-items: center !important;
+  row-gap: clamp(0.5rem, 1.2vh, 1.2rem) !important;
+  text-align: center !important;
+  padding: clamp(0.5rem, 1.5vh, 1.5rem) clamp(1.5rem, 4vw, 3rem) !important;
+  overflow: hidden !important;
+  position: relative !important;
+}
+
+/* ── Scaled-Up Typography & Controls (vh-based) ────────── */
+
+/* Session tag */
+body[data-current-view="checkout-scan-patron"] .co-session-tag {
+  font-size: clamp(0.85rem, 1.5vh, 1.15rem) !important;
+  padding: clamp(0.45rem, 1vh, 0.75rem) clamp(1.6rem, 4vw, 2.8rem) !important;
+  letter-spacing: 3px !important;
+  margin-bottom: 0 !important;
+}
+
+/* Card icon — fills the 1fr row */
+body[data-current-view="checkout-scan-patron"] .co-card-icon {
+  font-size: clamp(5rem, 14vh, 10rem) !important;
+  margin-bottom: 0 !important;
+  align-self: center !important;
+  line-height: 1 !important;
+}
+
+/* Main heading — large */
+body[data-current-view="checkout-scan-patron"] .co-patron-heading {
+  font-size: clamp(2.8rem, 5.5vh, 4.5rem) !important;
+  margin-bottom: 0 !important;
+  line-height: 1.15 !important;
+}
+
+/* Instruction text */
+body[data-current-view="checkout-scan-patron"] .co-patron-instruction {
+  font-size: clamp(1.2rem, 2.2vh, 1.65rem) !important;
+  max-width: 640px !important;
+  margin-bottom: 0 !important;
+  line-height: 1.45 !important;
+}
+
+/* Input group — wider */
+body[data-current-view="checkout-scan-patron"] .co-patron-input-group {
+  max-width: clamp(460px, 48vw, 640px) !important;
+  width: 100% !important;
+  margin-bottom: 0 !important;
+}
+
+/* Input field — tall & prominent */
+body[data-current-view="checkout-scan-patron"] .co-patron-input {
+  font-size: clamp(1.6rem, 3vh, 2.4rem) !important;
+  padding: clamp(1rem, 2.2vh, 1.6rem) clamp(1.5rem, 3vw, 2.5rem) !important;
+  border-radius: 18px !important;
+  letter-spacing: 5px !important;
+}
+
+/* RFID status */
+body[data-current-view="checkout-scan-patron"] .co-patron-status {
+  font-size: clamp(0.95rem, 1.6vh, 1.2rem) !important;
+  padding: clamp(0.5rem, 1vh, 0.9rem) clamp(1rem, 2.5vw, 1.6rem) !important;
+  border-radius: 12px !important;
+  margin-top: clamp(0.35rem, 0.8vh, 0.7rem) !important;
+}
+
+/* Button row — wider, taller */
+body[data-current-view="checkout-scan-patron"] .co-scan-patron-wrapper > div[style*="display: flex"][style*="gap"] {
+  max-width: clamp(480px, 48vw, 640px) !important;
+  width: 100% !important;
+  margin-top: 0 !important;
+  gap: clamp(0.75rem, 1.5vw, 1.25rem) !important;
+}
+
+body[data-current-view="checkout-scan-patron"] .co-btn-cancel,
+body[data-current-view="checkout-scan-patron"] .co-continue-btn {
+  font-size: clamp(1.15rem, 2.2vh, 1.55rem) !important;
+  padding: clamp(1.1rem, 2.4vh, 1.8rem) clamp(1.5rem, 3vw, 2.5rem) !important;
+  border-radius: 16px !important;
+}
+
+/* Demo hint */
+body[data-current-view="checkout-scan-patron"] .co-demo-hint {
+  font-size: clamp(0.92rem, 1.5vh, 1.15rem) !important;
+  margin-top: 0 !important;
+}
+
+/* ============================================
+   Check-out (Scan Books) — No Outer Scroll
+   ============================================ */
+
+/* Lock viewport for Scan Books screen */
+body[data-current-view="checkout-scan-books"] {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+body[data-current-view="checkout-scan-books"] .container {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100vh;
+  max-height: 100dvh;
+  overflow: hidden;
+  padding-bottom: 0 !important;
+}
+
+body[data-current-view="checkout-scan-books"] #view-checkout-scan-books.view.active {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  margin: 0;
+}
+
+/* ── Wrapper: Fills available space ── */
+body[data-current-view="checkout-scan-books"] .co-books-wrapper {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+  width: 100%;
+  overflow: hidden;
+  padding: 0.5rem 0;
+}
+
+/* Header stays at top */
+body[data-current-view="checkout-scan-books"] .co-books-header {
+  flex-shrink: 0;
+  margin-bottom: 1rem;
+}
+
+/* ── The List: ONLY this part scrolls ── */
+body[data-current-view="checkout-scan-books"] .co-book-list {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto !important;
+  overflow-x: hidden;
+  padding-right: 5px; /* Space for scrollbar */
+}
+
+/* Footer buttons stay at bottom */
+body[data-current-view="checkout-scan-books"] .co-action-buttons {
+  flex-shrink: 0;
+  margin-top: 1rem;
+  padding-top: 0.5rem;
+}
+
+/* ============================================
+   Check-in — No Outer Scroll
+   ============================================ */
+
+/* Lock viewport for Check-in screen */
+body[data-current-view="checkin"] {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+body[data-current-view="checkin"] .container {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100vh;
+  max-height: 100dvh;
+  overflow: hidden;
+  padding-bottom: 0 !important;
+}
+
+body[data-current-view="checkin"] #view-checkin.view.active {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  margin: 0;
+}
+
+/* ── Wrapper: Fills available space ── */
+body[data-current-view="checkin"] .checkin-wrapper {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+  width: 100%;
+  overflow: hidden;
+  padding: 0.5rem 0;
+}
+
+/* Title stays at top */
+body[data-current-view="checkin"] .page-title {
+  flex-shrink: 0;
+  margin-bottom: 1rem;
+}
+
+/* Step 1/2 containers */
+body[data-current-view="checkin"] .checkin-step {
+  flex-shrink: 0;
+}
+
+/* ── The Results List: ONLY this part scrolls ── */
+body[data-current-view="checkin"] #checkin-results {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto !important;
+  overflow-x: hidden;
+  padding-right: 5px;
+  margin-top: 1rem;
+}
+
+/* Done button container at bottom */
+body[data-current-view="checkin"] #checkin-scan-actions {
+  flex-shrink: 0;
+  margin-top: 1rem;
+  padding-top: 0.5rem;
+}
+
+/* ============================================
+   My Account — No Outer Scroll
+   ============================================ */
+
+/* Lock viewport for Account screen */
+body[data-current-view="account"] {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+body[data-current-view="account"] .container {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100vh;
+  max-height: 100dvh;
+  overflow: hidden;
+  padding-bottom: 0 !important;
+}
+
+body[data-current-view="account"] #view-account.view.active {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  margin: 0;
+}
+
+/* Dashboard container fills space */
+body[data-current-view="account"] #account-dashboard {
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+  width: 100%;
+  max-width: 800px !important; /* Increased for better list view */
+  padding: 1rem !important;
+  overflow: hidden;
+}
+
+/* ── The Account Results List: ONLY this part scrolls ── */
+body[data-current-view="account"] #account-results {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto !important;
+  overflow-x: hidden;
+  padding: 0.5rem;
+}
+
+/* Home button container at bottom */
+body[data-current-view="account"] #account-dashboard > div:last-child {
+  flex-shrink: 0;
+  margin-top: 1rem;
+  padding-top: 0.5rem;
+}
+
+/* ============================================
+   Check-in Success — Remove Outer Scrollbar
+   ============================================ */
+
+body[data-current-view="checkin-success"] {
+  height: 100vh !important;
+  height: 100svh !important;
+  max-height: 100vh !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+}
+
+body[data-current-view="checkin-success"] .container {
+  height: 100vh !important;
+  max-height: 100vh !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}

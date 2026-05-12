@@ -1,0 +1,30 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e8]:
+    - banner [ref=e9]:
+      - img "University Logo" [ref=e10]
+      - generic [ref=e12]: 🌐 Live Mode
+    - generic [ref=e14]:
+      - generic [ref=e15]:
+        - heading "Welcome to Punjabi University" [level=1] [ref=e16]:
+          - text: Welcome to
+          - generic [ref=e17]: Punjabi University
+        - paragraph [ref=e18]: Your gateway to knowledge • Tap a service to begin
+      - generic [ref=e19]:
+        - generic [ref=e20] [cursor=pointer]:
+          - generic [ref=e21]: 📕
+          - generic [ref=e22]: Check-Out
+          - generic [ref=e23]: Borrow items instantly
+        - generic [ref=e24] [cursor=pointer]:
+          - generic [ref=e25]: 📚
+          - generic [ref=e26]: Check-In
+          - generic [ref=e27]: Return books safely
+        - generic [ref=e28] [cursor=pointer]:
+          - generic [ref=e29]: 👤
+          - generic [ref=e30]: My Account
+          - generic [ref=e31]: Manage loans & fines
+        - generic [ref=e32] [cursor=pointer]:
+          - generic [ref=e33]: 🔄
+          - generic [ref=e34]: Renew
+          - generic [ref=e35]: Extend your loan period
+  - text: 📚
+  - generic [ref=e36]: ⚛ Powered by SoCTeamup Semiconductors

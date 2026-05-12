@@ -8,11 +8,9 @@ const { sipCheckin } = require('./sip-client');
 const crypto = require('crypto');
 let PDFDocument;
 try { PDFDocument = require('pdfkit'); } catch (_) { PDFDocument = null; }
-const { spawn } = require('child_process');
-const { sipCheckin } = require('./sip-client');
 const uuidv4 = () => Math.random().toString(36).substring(2, 11).toUpperCase(); 
 
-// Fallback logger since logger.js does not yet exist
+// Fallback logger
 const logger = {
   _writeToFile: (level, module, msg, meta) => {
     try {
@@ -50,26 +48,17 @@ const RFID_PORT = Number(process.env.RFID_BRIDGE_PORT || 3210);
 const RFID_BRIDGE_NAME = 'Mr101RfidBridge';
 const RFID_BUILD_SCRIPT = path.join(RFID_DIR, 'build.bat');
 const RFID_BUILD_DIR = path.join(RFID_DIR, 'build');
-
 const RFID_EXEC_DIR = process.env.RFID_RESOURCES_DIR || RFID_BUILD_DIR;
 const RFID_EXECUTABLE = path.join(RFID_EXEC_DIR, `${RFID_BRIDGE_NAME}.exe`);
-
-logger.info('System', 'Initializing RFID...', {
-  RFID_DIR,
-  RFID_BUILD_DIR,
-  RFID_EXEC_DIR,
-  RFID_EXECUTABLE,
-  exeExists: fs.existsSync(RFID_EXECUTABLE)
-});
 
 const APP_LOG_FILE = path.join(__dirname, 'logs', 'app.log');
 const RFID_LOG_FILE = path.join(__dirname, 'logs', 'rfid.log');
 const ERROR_LOG_FILE = path.join(__dirname, 'logs', 'error.log');
 const KOHA_CONFIG = {
-  baseUrl: process.env.KOHA_BASE_URL || 'http://164.52.208.94:82/api/v1',
-  username: process.env.KOHA_API_USER || 'jivesna',
-  password: process.env.KOHA_API_PASS || 'library@koha123',
-  libraryId: process.env.KOHA_LIBRARY_ID || 'CPL'
+  baseUrl: process.env.KOHA_BASE_URL || 'http://103.86.177.6:92/api/v1',
+  username: process.env.KOHA_API_USER || 'rfid',
+  password: process.env.KOHA_API_PASS || 'Rfid@#123',
+  libraryId: process.env.KOHA_LIBRARY_ID || 'PUPCL'
 };
 
 const RFID_STATE = {
@@ -81,7 +70,8 @@ const RFID_STATE = {
   startup: null,
   compileLog: '',
   disconnectionCount: 0,
-  monitorTimer: null
+  monitorTimer: null,
+  hardwareConnected: false
 };
 
 const MIME_TYPES = {
@@ -98,120 +88,70 @@ const MIME_TYPES = {
 
 const RFID_UID_BARCODE_CACHE = new Map();
 
-function normalizeRfidUid(value) {
-  return String(value || '').trim().toUpperCase();
-}
-
-function normalizeItemBarcode(value) {
-  return String(value || '').trim();
-}
-
-function isUsableRfidBarcode(value) {
-  return /^[A-Za-z0-9-]{4,32}$/.test(normalizeItemBarcode(value));
-}
+// --- RFID Utilities ---
+function normalizeRfidUid(value) { return String(value || '').trim().toUpperCase(); }
+function normalizeItemBarcode(value) { return String(value || '').trim(); }
+function isUsableRfidBarcode(value) { return /^[A-Za-z0-9-]{4,32}$/.test(normalizeItemBarcode(value)); }
 
 function rememberRfidUidBarcode(uid, barcode) {
-  const normalizedUid = normalizeRfidUid(uid);
-  const normalizedBarcode = normalizeItemBarcode(barcode);
-
-  if (!/^[0-9A-F]{8,}$/.test(normalizedUid) || !isUsableRfidBarcode(normalizedBarcode)) {
-    return '';
-  }
-
-  RFID_UID_BARCODE_CACHE.set(normalizedUid, normalizedBarcode);
-  return normalizedBarcode;
+  const nUid = normalizeRfidUid(uid), nBc = normalizeItemBarcode(barcode);
+  if (!/^[0-9A-F]{8,}$/.test(nUid) || !isUsableRfidBarcode(nBc)) return '';
+  RFID_UID_BARCODE_CACHE.set(nUid, nBc);
+  return nBc;
 }
 
-function getCachedBarcodeForUid(uid) {
-  return RFID_UID_BARCODE_CACHE.get(normalizeRfidUid(uid)) || '';
-}
-
+function getCachedBarcodeForUid(uid) { return RFID_UID_BARCODE_CACHE.get(normalizeRfidUid(uid)) || ''; }
 function getCachedUidForBarcode(barcode) {
-  const normalizedBarcode = normalizeItemBarcode(barcode);
-  if (!normalizedBarcode) {
-    return '';
-  }
-
-  for (const [uid, cachedBarcode] of RFID_UID_BARCODE_CACHE.entries()) {
-    if (cachedBarcode === normalizedBarcode) {
-      return uid;
-    }
-  }
-
+  const nBc = normalizeItemBarcode(barcode);
+  if (!nBc) return '';
+  for (const [uid, cachedBc] of RFID_UID_BARCODE_CACHE.entries()) if (cachedBc === nBc) return uid;
   return '';
 }
 
 function resolveItemBarcode(itemBarcode, rfidUid) {
-  const normalizedBarcode = normalizeItemBarcode(itemBarcode);
-  const cachedBarcode = getCachedBarcodeForUid(rfidUid);
-
-  if (cachedBarcode && (!normalizedBarcode || !isUsableRfidBarcode(normalizedBarcode))) {
-    return cachedBarcode;
-  }
-
-  return normalizedBarcode || cachedBarcode;
+  const nBc = normalizeItemBarcode(itemBarcode), cBc = getCachedBarcodeForUid(rfidUid);
+  if (cBc && (!nBc || !isUsableRfidBarcode(nBc))) return cBc;
+  return nBc || cBc;
 }
 
 function normalizeRfidTag(tag) {
-  if (!tag || typeof tag !== 'object') {
-    return tag;
-  }
-
-  const uid = normalizeRfidUid(tag.uid);
-  const bridgeBarcode = normalizeItemBarcode(tag.barcode);
-  const cachedBarcode = getCachedBarcodeForUid(uid);
-  const hasUsableBridgeBarcode = isUsableRfidBarcode(bridgeBarcode);
-  const resolvedBarcode = hasUsableBridgeBarcode ? bridgeBarcode : (cachedBarcode || bridgeBarcode);
-
-  if (uid && resolvedBarcode && resolvedBarcode !== cachedBarcode) {
-    rememberRfidUidBarcode(uid, resolvedBarcode);
-  }
-
-  return {
-    ...tag,
-    uid,
-    barcode: resolvedBarcode
+  if (!tag || typeof tag !== 'object') return tag;
+  const uid = normalizeRfidUid(tag.uid), bBc = normalizeItemBarcode(tag.barcode), cBc = getCachedBarcodeForUid(uid);
+  const resBc = isUsableRfidBarcode(bBc) ? bBc : (cBc || bBc);
+  if (uid && resBc && resBc !== cBc) rememberRfidUidBarcode(uid, resBc);
+  // Enrich for frontend rfid-service.js expectations
+  return { 
+    ...tag, 
+    uid, 
+    barcode: resBc, 
+    live: true, 
+    lastSeen: tag.lastSeen || 0,
+    afiWriteAttempted: tag.afiWriteAttempted ?? true 
   };
 }
 
 function warmRfidBarcodeCacheFromLogs() {
   try {
-    if (!fs.existsSync(APP_LOG_FILE)) {
-      return;
-    }
-
+    if (!fs.existsSync(APP_LOG_FILE)) return;
     const lines = fs.readFileSync(APP_LOG_FILE, 'utf8').split(/\r?\n/);
     for (const line of lines) {
-      const jsonStart = line.indexOf('{');
-      if (jsonStart === -1) {
-        continue;
-      }
-
+      const start = line.indexOf('{');
+      if (start === -1) continue;
       try {
-        const payload = JSON.parse(line.slice(jsonStart));
-        if (!payload || typeof payload !== 'object') {
-          continue;
+        const p = JSON.parse(line.slice(start));
+        if (p && typeof p === 'object') {
+          rememberRfidUidBarcode(p.uid, p.barcode);
+          rememberRfidUidBarcode(p.rfidUid, p.itemBarcode);
         }
-
-        rememberRfidUidBarcode(payload.uid, payload.barcode);
-        rememberRfidUidBarcode(payload.rfidUid, payload.itemBarcode);
-      } catch (_) {
-      }
+      } catch (_) {}
     }
-  } catch (error) {
-    logger.error('RFID', `Barcode cache warmup failed: ${error.message}`, { stack: error.stack });
-  }
+  } catch (e) { logger.error('RFID', `Cache warmup failed: ${e.message}`); }
 }
 
+// --- Server Utilities ---
 function sendJson(res, statusCode, payload) {
   const body = JSON.stringify(payload);
-  res.writeHead(statusCode, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body),
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type'
-  });
+  res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(body), 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
   res.end(body);
 }
 
@@ -221,49 +161,34 @@ function logBackend(event, details = {}) {
   logger.log(level, module, `${event}: ${JSON.stringify(details)}`, details);
 }
 
-function isImportantBridgeMessage(message) {
-  return /MR101 Connected|Auto-AFI write success|Auto-AFI write failed|AFI write success|AFI write failed|No FEIG reader|FEUSB_OpenDevice failed|Failed to map all functions|CRITICAL ERROR|FATAL|Exception|Disconnected/i.test(message);
+function isImportantBridgeMessage(msg) { return /MR101 Connected|Auto-AFI write success|Auto-AFI write failed|AFI write success|AFI write failed|No FEIG reader|FEUSB_OpenDevice failed|Failed to map all functions|CRITICAL ERROR|FATAL|Exception|Disconnected/i.test(msg); }
+function getBridgeEventName(msg, stream) {
+  if (/MR101 Connected/i.test(msg)) return 'rfid.reader.connected';
+  if (/write success/i.test(msg)) return 'rfid.security.write';
+  if (/write failed/i.test(msg)) return 'rfid.security.error';
+  if (/Disconnected/i.test(msg)) return 'rfid.bridge.exit';
+  if (/No FEIG reader|failed|error|exception|fatal|critical/i.test(msg)) return 'rfid.bridge.error';
+  return `rfid.${stream}`;
 }
 
-function getBridgeEventName(message, streamName) {
-  if (/MR101 Connected/i.test(message)) {
-    return 'rfid.reader.connected';
-  }
-  if (/write success/i.test(message)) {
-    return 'rfid.security.write';
-  }
-  if (/write failed/i.test(message)) {
-    return 'rfid.security.error';
-  }
-  if (/Disconnected/i.test(message)) {
-    return 'rfid.bridge.exit';
-  }
-  if (/No FEIG reader|failed|error|exception|fatal|critical/i.test(message)) {
-    return 'rfid.bridge.error';
-  }
-  return `rfid.${streamName}`;
-}
-
-function createBridgeOutputHandler(streamName) {
-  let buffer = '';
-
+function createBridgeOutputHandler(stream) {
+  let buf = '';
   return (chunk) => {
-    buffer += chunk.toString('utf8');
-    const lines = buffer.split(/\r?\n/);
-    buffer = lines.pop() || '';
-
-    for (const rawLine of lines) {
-      const message = rawLine.trim();
-      if (!message || !isImportantBridgeMessage(message)) {
-        continue;
-      }
-      const eventName = getBridgeEventName(message, streamName);
-      logBackend(eventName, { message });
-
-      // Identify errors proactively so monitoring can handle them
-      if (eventName === 'rfid.bridge.error') {
-        RFID_STATE.status = 'error';
-        RFID_STATE.lastError = message;
+    buf += chunk.toString('utf8');
+    const lines = buf.split(/\r?\n/);
+    buf = lines.pop() || '';
+    for (const line of lines) {
+      const msg = line.trim();
+      if (!msg || !isImportantBridgeMessage(msg)) continue;
+      const ev = getBridgeEventName(msg, stream);
+      logBackend(ev, { message: msg });
+      if (ev === 'rfid.reader.connected') { RFID_STATE.hardwareConnected = true; }
+      if (ev === 'rfid.bridge.error') { 
+        RFID_STATE.status = 'error'; 
+        RFID_STATE.lastError = msg; 
+        if (/No FEIG reader|Device not open|Disconnected|FEUSB_OpenDevice/i.test(msg)) {
+          RFID_STATE.hardwareConnected = false;
+        }
       }
     }
   };
@@ -271,15 +196,9 @@ function createBridgeOutputHandler(streamName) {
 
 function serveFile(res, filePath) {
   fs.readFile(filePath, (err, data) => {
-    if (err) {
-      sendJson(res, 404, { success: false, message: 'File not found' });
-      return;
-    }
-
+    if (err) return sendJson(res, 404, { success: false, message: 'File not found' });
     const ext = path.extname(filePath).toLowerCase();
-    res.writeHead(200, {
-      'Content-Type': MIME_TYPES[ext] || 'application/octet-stream'
-    });
+    res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] || 'application/octet-stream' });
     res.end(data);
   });
 }
@@ -287,2467 +206,537 @@ function serveFile(res, filePath) {
 function parseRequestBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
-
-    req.on('data', (chunk) => {
-      body += chunk.toString('utf8');
-      if (body.length > 1024 * 1024) {
-        reject(new Error('Request body too large'));
-        req.destroy();
-      }
-    });
-
-    req.on('end', () => {
-      if (!body) {
-        resolve({});
-        return;
-      }
-
-      try {
-        resolve(JSON.parse(body));
-      } catch (error) {
-        reject(new Error('Invalid JSON body'));
-      }
-    });
-
+    req.on('data', (c) => { body += c.toString('utf8'); if (body.length > 1024 * 1024) { reject(new Error('Body too large')); req.destroy(); } });
+    req.on('end', () => { if (!body) return resolve({}); try { resolve(JSON.parse(body)); } catch (_) { reject(new Error('Invalid JSON')); } });
     req.on('error', reject);
   });
 }
 
-function runCommand(command, args, options = {}) {
+function runCommand(cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      env: options.env || process.env,
-      windowsHide: true
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.on('data', (chunk) => {
-      stdout += chunk.toString('utf8');
-    });
-
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString('utf8');
-    });
-
+    const child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env || process.env, windowsHide: true });
+    let so = '', se = '';
+    child.stdout.on('data', (c) => so += c.toString('utf8'));
+    child.stderr.on('data', (c) => se += c.toString('utf8'));
     child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve({ stdout, stderr });
-        return;
-      }
-
-      reject(new Error((stderr || stdout || `${command} exited with code ${code}`).trim()));
-    });
+    child.on('close', (code) => code === 0 ? resolve({ stdout: so, stderr: se }) : reject(new Error((se || so || `${cmd} failed`).trim())));
   });
 }
 
-function getLatestMtimeMs(targetPath) {
-  if (!fs.existsSync(targetPath)) {
-    return 0;
-  }
-
-  const stats = fs.statSync(targetPath);
-  if (!stats.isDirectory()) {
-    return stats.mtimeMs;
-  }
-
-  let latest = stats.mtimeMs;
-  const entries = fs.readdirSync(targetPath, { withFileTypes: true });
-  for (const entry of entries) {
-    const entryPath = path.join(targetPath, entry.name);
-    const entryLatest = getLatestMtimeMs(entryPath);
-    if (entryLatest > latest) {
-      latest = entryLatest;
-    }
-  }
-
-  return latest;
-}
-
-function shouldCompileRfidBridge() {
-  if (process.env.RFID_FORCE_REBUILD === '1') {
-    return true;
-  }
-
-  if (!fs.existsSync(RFID_EXECUTABLE)) {
-    return true;
-  }
-
-  return false;
-}
-
+// --- RFID Bridge Management ---
+function shouldCompileRfidBridge() { return process.env.RFID_FORCE_REBUILD === '1' || !fs.existsSync(RFID_EXECUTABLE); }
 async function compileRfidBridge() {
-  if (!shouldCompileRfidBridge()) {
-    RFID_STATE.compileLog = 'Skipped compile: existing bridge executable is up-to-date.';
-    return;
-  }
-
+  if (!shouldCompileRfidBridge()) { RFID_STATE.compileLog = 'Skipped: up-to-date.'; return; }
   fs.mkdirSync(RFID_BUILD_DIR, { recursive: true });
-  const result = await runCommand('cmd.exe', ['/c', RFID_BUILD_SCRIPT], {
-    cwd: RFID_DIR
-  });
-
-  RFID_STATE.compileLog = `${result.stdout}${result.stderr}`.trim();
+  const res = await runCommand('cmd.exe', ['/c', RFID_BUILD_SCRIPT], { cwd: RFID_DIR });
+  RFID_STATE.compileLog = `${res.stdout}${res.stderr}`.trim();
 }
 
-function proxyRfidRequest(apiPath, options = {}) {
+function proxyRfidRequest(apiPath, opts = {}) {
   return new Promise((resolve, reject) => {
-    const method = options.method || 'GET';
-    const payload = options.body ? JSON.stringify(options.body) : null;
-    const request = http.request(
-      {
-        hostname: '127.0.0.1',
-        port: RFID_PORT,
-        path: apiPath,
-        method,
-        headers: payload
-          ? {
-              'Content-Type': 'application/json',
-              'Content-Length': Buffer.byteLength(payload)
-            }
-          : undefined
-      },
-      (response) => {
-        let body = '';
-
-        response.on('data', (chunk) => {
-          body += chunk.toString('utf8');
-        });
-
-        response.on('end', () => {
-          if (response.statusCode < 200 || response.statusCode >= 300) {
-            try {
-              const errorPayload = JSON.parse(body);
-              reject(new Error(errorPayload.message || `RFID bridge responded with status ${response.statusCode}`));
-            } catch (_) {
-              reject(new Error(`RFID bridge responded with status ${response.statusCode}: ${body}`));
-            }
-            return;
-          }
-
-          try {
-            resolve(JSON.parse(body));
-          } catch (error) {
-            reject(new Error('RFID bridge returned invalid JSON'));
-          }
-        });
-      }
-    );
-
-    request.on('error', (error) => {
-      reject(new Error(`RFID bridge unavailable: ${error.message}`));
+    const method = opts.method || 'GET', payload = opts.body ? JSON.stringify(opts.body) : null;
+    const req = http.request({ hostname: '127.0.0.1', port: RFID_PORT, path: apiPath, method, headers: payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : undefined }, (res) => {
+      let b = '';
+      res.on('data', (c) => b += c.toString('utf8'));
+      res.on('end', () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) { try { reject(new Error(JSON.parse(b).message || `Status ${res.statusCode}`)); } catch (_) { reject(new Error(`Status ${res.statusCode}: ${b}`)); } return; }
+        try { resolve(JSON.parse(b)); } catch (_) { reject(new Error('Invalid JSON from bridge')); }
+      });
     });
-
-    if (payload) {
-      request.write(payload);
-    }
-
-    request.end();
+    req.on('error', (e) => {
+      RFID_STATE.hardwareConnected = false; // Mark as disconnected if bridge is down
+      reject(new Error(`Bridge unavailable: ${e.message}`));
+    });
+    if (payload) req.write(payload);
+    req.end();
   });
-}
-
-function isLiveRfidTag(tag) {
-  if (!tag || typeof tag !== 'object') {
-    return false;
-  }
-
-  if (tag.live === true) {
-    return true;
-  }
-
-  if (typeof tag.live === 'string' && tag.live.toLowerCase() === 'true') {
-    return true;
-  }
-
-  const lastSeen = Number(tag.lastSeen || 0);
-  return Number.isFinite(lastSeen) && lastSeen > 0 && (Date.now() - lastSeen) <= 1000;
-}
-
-function filterLiveRfidTags(tags) {
-  if (!Array.isArray(tags)) {
-    return [];
-  }
-
-  return tags
-    .filter(isLiveRfidTag)
-    .sort((left, right) => Number(right?.lastSeen || 0) - Number(left?.lastSeen || 0));
 }
 
 async function writeRfidSecurityState({ barcode, uid, afi, state }) {
-  if (!RFID_STATE.enabled) {
-    return {
-      success: false,
-      skipped: true,
-      message: 'RFID integration is disabled'
-    };
-  }
-
+  if (!RFID_STATE.enabled) return { success: false, skipped: true, message: 'Disabled' };
   await ensureRfidBridgeStarted();
-
-  let normalizedUid = normalizeRfidUid(uid);
-  let normalizedBarcode = normalizeItemBarcode(barcode);
-  const normalizedAfi = String(afi || '').trim().toUpperCase();
-  const normalizedState = String(state || '').trim();
-
-  if (normalizedUid) {
-    normalizedBarcode = resolveItemBarcode(normalizedBarcode, normalizedUid);
-  }
-
-  if (!normalizedUid && normalizedBarcode) {
-    normalizedUid = getCachedUidForBarcode(normalizedBarcode);
-  }
-
-  if (!normalizedBarcode && !normalizedUid) {
-    throw new Error('Barcode or UID is required for RFID security update');
-  }
-
-  if (!/^[0-9A-F]{2}$/.test(normalizedAfi)) {
-    throw new Error('AFI must be a 2-digit hex value');
-  }
-
-  if (!normalizedUid) {
+  let nUid = normalizeRfidUid(uid), nBc = resolveItemBarcode(normalizeItemBarcode(barcode), nUid);
+  if (!nUid && nBc) nUid = getCachedUidForBarcode(nBc);
+  if (!nBc && !nUid) throw new Error('Barcode or UID required');
+  if (!/^[0-9A-F]{2}$/.test(String(afi))) throw new Error('Invalid AFI');
+  if (!nUid) {
     try {
-      const visibleTags = filterLiveRfidTags(await proxyRfidRequest('/api/tags')).map(normalizeRfidTag);
-      const matchingTag = visibleTags.find((tag) => String(tag.barcode || '').trim() === normalizedBarcode);
-      if (matchingTag?.uid) {
-        normalizedUid = String(matchingTag.uid).trim().toUpperCase();
-      } else if (visibleTags.length === 1 && visibleTags[0]?.uid) {
-        normalizedUid = String(visibleTags[0].uid).trim().toUpperCase();
-      }
-    } catch (_) {
-    }
+      const tags = filterLiveRfidTags(await proxyRfidRequest('/api/tags')).map(normalizeRfidTag);
+      const match = tags.find(t => t.barcode === nBc) || (tags.length === 1 ? tags[0] : null);
+      if (match?.uid) nUid = match.uid;
+    } catch (_) {}
   }
-
-  const params = new URLSearchParams();
-  if (normalizedBarcode) params.set('barcode', normalizedBarcode);
-  if (normalizedUid) params.set('uid', normalizedUid);
-  params.set('afi', normalizedAfi);
-
-  const result = await proxyRfidRequest(`/api/write-afi?${params.toString()}`);
-  rememberRfidUidBarcode(normalizedUid, normalizedBarcode);
-  logBackend('rfid.security.write', {
-    barcode: normalizedBarcode,
-    uid: normalizedUid,
-    afi: normalizedAfi,
-    state: normalizedState,
-    result
-  });
-
-  return {
-    ...result,
-    requestedState: normalizedState,
-    requestedAfi: normalizedAfi
-  };
+  const res = await proxyRfidRequest(`/api/write-afi?barcode=${encodeURIComponent(nBc || '')}&uid=${encodeURIComponent(nUid || '')}&afi=${encodeURIComponent(afi)}`);
+  rememberRfidUidBarcode(nUid, nBc);
+  logBackend('rfid.security.write', { barcode: nBc, uid: nUid, afi, state, result: res });
+  return { ...res, requestedState: state, requestedAfi: afi };
 }
 
-async function handleRfidArm(req, res) {
-  try {
-    const reqUrl = new URL(req.url, `http://${req.headers.host}`);
-    const afi = reqUrl.searchParams.get('afi') || '';
-    if (!afi) {
-      sendJson(res, 400, { success: false, message: 'afi query param required' });
-      return;
-    }
-    await ensureRfidBridgeStarted();
-    const result = await proxyRfidRequest(`/api/arm?afi=${encodeURIComponent(afi)}`);
-    logBackend('rfid.arm', { afi, result });
-    sendJson(res, 200, result);
-  } catch (error) {
-    logBackend('rfid.arm.error', { message: error.message });
-    sendJson(res, 500, { success: false, armed: false, message: error.message });
-  }
-}
-
-async function handleRfidDisarm(req, res) {
-  try {
-    await ensureRfidBridgeStarted();
-    const result = await proxyRfidRequest('/api/disarm');
-    logBackend('rfid.disarm', { result });
-    sendJson(res, 200, result);
-  } catch (error) {
-    logBackend('rfid.disarm.error', { message: error.message });
-    sendJson(res, 500, { success: false, armed: false, message: error.message });
-  }
-}
-
-function waitForBridgeReady(timeoutMs = 20000) {
-  const startedAt = Date.now();
-  const retryIntervalMs = 150;
-
+function waitForBridgeReady(timeoutMs = 25000) {
+  const start = Date.now();
   return new Promise((resolve, reject) => {
-    const check = () => {
-      proxyRfidRequest('/api/status')
-        .then(resolve)
-        .catch((error) => {
-          if ((Date.now() - startedAt) >= timeoutMs) {
-            reject(error);
-            return;
-          }
-          setTimeout(check, retryIntervalMs);
-        });
-    };
-
+    const check = () => proxyRfidRequest('/api/status').then(resolve).catch((e) => (Date.now() - start >= timeoutMs) ? reject(e) : setTimeout(check, 200));
     check();
   });
 }
 
 function startRfidMonitor() {
   if (RFID_STATE.monitorTimer) return;
-
   RFID_STATE.monitorTimer = setInterval(async () => {
-    if (!RFID_STATE.enabled || RFID_STATE.status === 'starting' || RFID_STATE.status === 'compiling' || RFID_STATE.startup) {
-      return;
-    }
-
+    if (!RFID_STATE.enabled || RFID_STATE.status === 'starting' || RFID_STATE.startup) return;
     try {
-      if (RFID_STATE.status === 'error' && RFID_STATE.child) {
-        logger.info('RFID', 'Cleaning up errored bridge process before restart');
-        stopRfidBridge();
-        return;
-      }
-
+      if (RFID_STATE.status === 'error' && RFID_STATE.child) { stopRfidBridge(); return; }
       if (!RFID_STATE.child || RFID_STATE.status !== 'running') {
-        const lastCrash = Number(RFID_STATE.child?.exitTime || 0);
-        if (Date.now() - lastCrash < 2000) {
-          return; // Wait at least 2s after a crash before restarting
-        }
+        if (Date.now() - (RFID_STATE.child?.exitTime || 0) < 3000) return;
         await ensureRfidBridgeStarted();
         return;
       }
 
-      const bridgeStatus = await proxyRfidRequest('/api/status');
-      let isHardwareConnected = (bridgeStatus.status === 'CONNECTED' || bridgeStatus.connected === true);
-
-      // If the bridge reports a fatal USB error but still claims to be CONNECTED, it's a zombie state.
-      if (bridgeStatus.lastError && /Device not open|failed|Disconnected/i.test(bridgeStatus.lastError)) {
-        logger.warn('RFID', `Hardware connection lost detected via lastError: ${bridgeStatus.lastError}`);
-        isHardwareConnected = false;
+      const bs = await proxyRfidRequest('/api/status');
+      const bridgeConnected = bs.status === 'CONNECTED' || bs.connected === true;
+      let hardwareHealthy = bridgeConnected;
+      
+      // If bridge says connected but we have a critical error, check if it's stale or active
+      if (bridgeConnected && bs.lastError && /Device not open|Disconnected|FEUSB_OpenDevice|No FEIG reader/i.test(bs.lastError)) {
+          // If we haven't seen a tag in a while AND we have this error, mark as unhealthy
+          // But give it a few chances to clear itself
+          hardwareHealthy = false;
       }
 
-      // Eagerly probe the reader hardware to detect "Zombie" connection states
-      // where the USB was physically removed but the C++ bridge hasn't crashed.
-      if (isHardwareConnected) {
-        try {
-          // Probe actual tag reading. If USB is gone, this should timeout or throw.
-          await proxyRfidRequest('/api/tags');
-        } catch (probeError) {
-          logger.warn('RFID', `Hardware probe failed, device likely physically unplugged: ${probeError.message}`);
-          isHardwareConnected = false;
-        }
+      // Final health check: try to fetch tags if bridge thinks it's okay
+      if (hardwareHealthy) { 
+          try { await proxyRfidRequest('/api/tags'); } 
+          catch (_) { hardwareHealthy = false; } 
       }
 
-      if (!isHardwareConnected) {
+      if (!hardwareHealthy) {
         RFID_STATE.disconnectionCount++;
-        if (RFID_STATE.disconnectionCount >= 2) {
-          logger.warn('RFID', 'Attempting bridge restart due to missing hardware response');
+        // If we have at least 1 failure, mark as disconnected for UI immediate feedback
+        RFID_STATE.hardwareConnected = false;
+        
+        // Require 3 consecutive failures (6 seconds) before restarting
+        if (RFID_STATE.disconnectionCount >= 3) {
+          logger.warn('RFID', `Restarting bridge: hardware health check failed 3 times. LastError: ${bs.lastError || 'None'}`);
           stopRfidBridge();
           RFID_STATE.disconnectionCount = 0;
         }
       } else {
+        RFID_STATE.hardwareConnected = true;
         RFID_STATE.disconnectionCount = 0;
       }
-    } catch (error) {
-      RFID_STATE.disconnectionCount++;
-      if (RFID_STATE.disconnectionCount >= 2) {
-        logger.warn('RFID', `Bridge unresponsive, restarting: ${error.message}`);
-        stopRfidBridge();
-        RFID_STATE.disconnectionCount = 0;
+    } catch (e) {
+      if (++RFID_STATE.disconnectionCount >= 5) { 
+          logger.warn('RFID', `Restarting bridge: multiple poll failures. Error: ${e.message}`);
+          stopRfidBridge(); 
+          RFID_STATE.disconnectionCount = 0; 
       }
     }
-  }, 5000);
-}
-
-function stopRfidMonitor() {
-  if (RFID_STATE.monitorTimer) {
-    clearInterval(RFID_STATE.monitorTimer);
-    RFID_STATE.monitorTimer = null;
-  }
+  }, 2000);
 }
 
 async function ensureRfidBridgeStarted() {
-  if (!RFID_STATE.enabled) {
-    RFID_STATE.status = 'disabled';
-    return;
-  }
-
-  if (RFID_STATE.child) {
-    return;
-  }
-
-  if (RFID_STATE.startup) {
-    return RFID_STATE.startup;
-  }
+  if (!RFID_STATE.enabled) { RFID_STATE.status = 'disabled'; return; }
+  if (RFID_STATE.child) return;
+  if (RFID_STATE.startup) return RFID_STATE.startup;
 
   RFID_STATE.startup = (async () => {
-    try {
-      const existingStatus = await proxyRfidRequest('/api/status');
-      RFID_STATE.status = 'running';
-      RFID_STATE.lastError = '';
-      return existingStatus;
-    } catch (_) {
-    }
-
+    try { return await proxyRfidRequest('/api/status'); } catch (_) {}
     RFID_STATE.status = 'compiling';
-    RFID_STATE.lastError = '';
-    logger.info('RFID', 'Compiling RFID bridge...');
-    try {
-      await compileRfidBridge();
-      if (RFID_STATE.compileLog && RFID_STATE.compileLog.includes('Compilation failed')) {
-        throw new Error('Bridge compilation failed. Check rfid-integration/build/compile.log');
-      }
-    } catch (compileError) {
-      logger.error('RFID', 'Compilation failed: ' + compileError.message);
-      RFID_STATE.status = 'error';
-      RFID_STATE.lastError = compileError.message;
-      throw compileError;
-    }
     await compileRfidBridge();
-
+    if (RFID_STATE.compileLog.includes('failed')) throw new Error('Compile failed');
     RFID_STATE.status = 'starting';
-    logger.info('RFID', `Starting bridge executable: ${RFID_EXECUTABLE}`);
-    const child = spawn(RFID_EXECUTABLE, [], {
-      cwd: RFID_EXEC_DIR,
-      env: {
-        ...process.env,
-        RFID_BRIDGE_PORT: String(RFID_PORT)
-      },
-      windowsHide: true
-    });
-
+    const child = spawn(RFID_EXECUTABLE, [], { cwd: RFID_EXEC_DIR, env: { ...process.env, RFID_BRIDGE_PORT: String(RFID_PORT) }, windowsHide: true });
     RFID_STATE.child = child;
-    child.exitTime = 0;
-
     child.stdout.on('data', createBridgeOutputHandler('stdout'));
     child.stderr.on('data', createBridgeOutputHandler('stderr'));
-
-    child.on('exit', (code, signal) => {
-      if (RFID_STATE.child === child) {
-          RFID_STATE.child = null;
-      }
-      child.exitTime = Date.now();
-      RFID_STATE.child = null;
-      RFID_STATE.status = 'stopped';
-      RFID_STATE.lastError = `RFID bridge exited (code=${code}, signal=${signal || 'none'})`;
-      logger.warn('RFID', `RFID bridge stopped unexpectedly: ${RFID_STATE.lastError}`);
-      RFID_STATE.startup = null;
-    });
-
-    child.on('error', (error) => {
-      RFID_STATE.lastError = error.message;
-      logger.error('RFID', `RFID bridge process error: ${error.message}`, { error });
-    });
-
-    logger.info('RFID', 'Waiting for bridge to become healthy...');
-    try {
-        await waitForBridgeReady(25000); // Increased timeout to 25s
-        logger.info('RFID', 'RFID bridge is running and healthy');
-        RFID_STATE.status = 'running';
-    } catch (healthyError) {
-        logger.error('RFID', 'Bridge failed to reach healthy state: ' + healthyError.message);
-        stopRfidBridge();
-        throw healthyError;
-    }
+    child.on('exit', (c, s) => { if (RFID_STATE.child === child) RFID_STATE.child = null; child.exitTime = Date.now(); RFID_STATE.status = 'stopped'; RFID_STATE.startup = null; });
     await waitForBridgeReady();
-    logger.info('RFID', 'RFID bridge is running and healthy');
     RFID_STATE.status = 'running';
-  })()
-    .catch((error) => {
-      RFID_STATE.status = 'error';
-      RFID_STATE.lastError = error.message;
-      if (RFID_STATE.child) stopRfidBridge();
-      RFID_STATE.child = null;
-      throw error;
-    })
-    .finally(() => {
-      RFID_STATE.startup = null;
-    });
-
+  })().catch((e) => { RFID_STATE.status = 'error'; RFID_STATE.lastError = e.message; stopRfidBridge(); throw e; }).finally(() => RFID_STATE.startup = null);
   return RFID_STATE.startup;
 }
 
 function stopRfidBridge() {
-  if (RFID_STATE.child) {
-    try {
-      RFID_STATE.child.kill('SIGTERM');
-      const oldChild = RFID_STATE.child;
-      setTimeout(() => {
-        try { oldChild.kill('SIGKILL'); } catch (_) {}
-      }, 1000);
-    } catch (_) {}
-    RFID_STATE.child = null;
-  }
+  if (RFID_STATE.child) { try { RFID_STATE.child.kill('SIGTERM'); const c = RFID_STATE.child; setTimeout(() => { try { c.kill('SIGKILL'); } catch (_) {} }, 1000); } catch (_) {} RFID_STATE.child = null; }
+  RFID_STATE.status = 'stopped';
 }
 
-function readRecentBackendLogLines(maxLines = 200) {
-  try {
-    if (!fs.existsSync(APP_LOG_FILE)) {
-      return [];
-    }
-
-    const lines = fs.readFileSync(APP_LOG_FILE, 'utf8')
-      .split(/\r?\n/)
-      .filter(Boolean);
-
-    return lines.slice(-maxLines);
-  } catch (error) {
-    return [`failed to read backend log: ${error.message}`];
-  }
+function stopRfidMonitor() {
+  if (RFID_STATE.monitorTimer) { clearInterval(RFID_STATE.monitorTimer); RFID_STATE.monitorTimer = null; }
 }
 
-// Cached koha online state logic from earlier optimizations
-let cachedKohaOnline = true;
-let lastKohaCheckAt = 0;
+async function restartRfidBridge() {
+  stopRfidBridge();
+  return ensureRfidBridgeStarted();
+}
+
+function filterLiveRfidTags(ts) {
+  const tags = Array.isArray(ts) ? ts : (ts?.tags || []);
+  return tags.filter(t => t && t.uid);
+}
+
+// --- Reachability ---
+async function isInternetReachable() {
+  return new Promise((resolve) => {
+    require('dns').lookup('google.com', (err) => {
+      if (!err) return resolve(true);
+      const s = require('net').createConnection(53, '8.8.8.8');
+      s.setTimeout(2000);
+      s.on('connect', () => { s.destroy(); resolve(true); });
+      s.on('error', () => { s.destroy(); resolve(false); });
+      s.on('timeout', () => { s.destroy(); resolve(false); });
+    });
+  });
+}
 
 async function isKohaReachable() {
-  const now = Date.now();
-  if (now - lastKohaCheckAt < 10000) {
-    return cachedKohaOnline;
-  }
-
   return new Promise((resolve) => {
     const url = new URL(KOHA_CONFIG.baseUrl);
-    const request = http.request(
-      {
-        hostname: url.hostname,
-        port: url.port || 80,
-        path: '/',
-        method: 'HEAD',
-        timeout: 2000
-      },
-      (res) => {
-        res.resume();
-        cachedKohaOnline = true;
-        lastKohaCheckAt = Date.now();
-        resolve(true); // Any response means reachable
-      }
-    );
-    request.on('error', () => {
-      cachedKohaOnline = false;
-      lastKohaCheckAt = Date.now();
-      resolve(false);
-    });
-    request.on('timeout', () => {
-      request.destroy();
-      cachedKohaOnline = false;
-      lastKohaCheckAt = Date.now();
-      resolve(false);
-    });
-    request.end();
+    const req = http.request({ hostname: url.hostname, port: url.port || 80, path: '/', method: 'HEAD', timeout: 2000 }, (res) => { res.resume(); resolve(true); });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.end();
   });
 }
 
-function kohaRequest(apiPath) {
+// --- Koha API ---
+function kohaRequest(path) {
   return new Promise((resolve, reject) => {
-    const url = new URL(`${KOHA_CONFIG.baseUrl}${apiPath}`);
-    const authHeader = 'Basic ' + Buffer.from(`${KOHA_CONFIG.username}:${KOHA_CONFIG.password}`).toString('base64');
-
-    logBackend('koha.request.start', { url: url.toString(), user: KOHA_CONFIG.username });
-
-    const request = http.request(
-      {
-        hostname: url.hostname,
-        port: url.port || 80,
-        path: `${url.pathname}${url.search}`,
-        method: 'GET',
-        headers: {
-          Authorization: authHeader,
-          Accept: 'application/json'
-        }
-      },
-      (response) => {
-        let body = '';
-
-        response.on('data', (chunk) => {
-          body += chunk.toString('utf8');
-        });
-
-        response.on('end', () => {
-          if (response.statusCode < 200 || response.statusCode >= 300) {
-            const err = new Error(`Koha request failed with status ${response.statusCode}: ${body}`);
-            err.url = url.toString();
-            logBackend('koha.request.error', { url: err.url, statusCode: response.statusCode, responseBody: body });
-            reject(err);
-            return;
-          }
-
-          try {
-            resolve(JSON.parse(body));
-          } catch (error) {
-            reject(new Error('Failed to parse Koha response'));
-          }
-        });
-      }
-    );
-
-    request.on('error', (error) => {
-      reject(new Error(`Koha connection error: ${error.message}`));
+    const url = new URL(`${KOHA_CONFIG.baseUrl}${path}`), auth = 'Basic ' + Buffer.from(`${KOHA_CONFIG.username}:${KOHA_CONFIG.password}`).toString('base64');
+    const req = http.request({ hostname: url.hostname, port: url.port || 80, path: `${url.pathname}${url.search}`, method: 'GET', headers: { Authorization: auth, Accept: 'application/json' }, timeout: 10000 }, (res) => {
+      let b = ''; res.on('data', (c) => b += c.toString('utf8'));
+      res.on('end', () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(`Koha error ${res.statusCode}: ${b}`));
+        try { resolve(JSON.parse(b)); } catch (_) { reject(new Error('Invalid JSON')); }
+      });
     });
-
-    request.end();
+    req.on('timeout', () => { req.destroy(); reject(new Error('Koha request timed out')); });
+    req.on('error', reject); req.end();
   });
 }
 
-function kohaPost(apiPath, payload) {
+function kohaPost(path, payload) {
   return new Promise((resolve, reject) => {
-    const url = new URL(`${KOHA_CONFIG.baseUrl}${apiPath}`);
-    const authHeader = 'Basic ' + Buffer.from(`${KOHA_CONFIG.username}:${KOHA_CONFIG.password}`).toString('base64');
-    const body = JSON.stringify(payload || {});
-
-    const request = http.request(
-      {
-        hostname: url.hostname,
-        port: url.port || 80,
-        path: `${url.pathname}${url.search}`,
-        method: 'POST',
-        headers: {
-          Authorization: authHeader,
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body)
-        }
-      },
-      (response) => {
-        let responseBody = '';
-
-        response.on('data', (chunk) => {
-          responseBody += chunk.toString('utf8');
-        });
-
-        response.on('end', () => {
-          if (response.statusCode < 200 || response.statusCode >= 300) {
-            reject(new Error(responseBody || `Koha POST failed with status ${response.statusCode}`));
-            return;
-          }
-
-          try {
-            resolve(responseBody ? JSON.parse(responseBody) : {});
-          } catch (error) {
-            reject(new Error('Failed to parse Koha POST response'));
-          }
-        });
-      }
-    );
-
-    request.on('error', (error) => {
-      reject(new Error(`Koha POST error: ${error.message}`));
+    const url = new URL(`${KOHA_CONFIG.baseUrl}${path}`), auth = 'Basic ' + Buffer.from(`${KOHA_CONFIG.username}:${KOHA_CONFIG.password}`).toString('base64'), body = JSON.stringify(payload);
+    const req = http.request({ hostname: url.hostname, port: url.port || 80, path: `${url.pathname}${url.search}`, method: 'POST', headers: { Authorization: auth, Accept: 'application/json', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }, timeout: 10000 }, (res) => {
+      let b = ''; res.on('data', (c) => b += c.toString('utf8'));
+      res.on('end', () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(b || `Koha error ${res.statusCode}`));
+        try { resolve(b ? JSON.parse(b) : {}); } catch (_) { resolve({}); }
+      });
     });
-
-    request.write(body);
-    request.end();
+    req.on('timeout', () => { req.destroy(); reject(new Error('Koha request timed out')); });
+    req.on('error', reject); req.write(body); req.end();
   });
 }
 
-function parseKohaErrorPayload(rawMessage) {
-  const message = String(rawMessage || '').trim();
-  if (!message) {
-    return {};
-  }
+function normalizeCollection(p) { return Array.isArray(p) ? p : (p && Array.isArray(p.value) ? p.value : []); }
+function findExactMatch(rs, f, v) { const t = String(v || '').trim(); return rs.find(r => String(r?.[f] || '').trim() === t) || null; }
+function firstNonEmpty(vs) { for (const v of vs) if (typeof v === 'string' && v.trim()) return v.trim(); return ''; }
 
-  try {
-    return JSON.parse(message);
-  } catch (_) {
-    return {};
-  }
-}
-
-function isKohaConfirmationError(error) {
-  const message = String(error?.message || '').trim();
-  if (!message) {
-    return false;
-  }
-
-  if (/confirmation error/i.test(message)) {
-    return true;
-  }
-
-  const payload = parseKohaErrorPayload(message);
-  return /confirmation error/i.test(String(payload.error || payload.message || ''));
-}
-
-function normalizeCollection(payload) {
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-
-  if (payload && Array.isArray(payload.value)) {
-    return payload.value;
-  }
-
-  return [];
-}
-
-function findExactMatch(records, fieldName, expectedValue) {
-  const target = String(expectedValue || '').trim();
-  return records.find((record) => String(record?.[fieldName] || '').trim() === target) || null;
-}
-
-function firstNonEmpty(values) {
-  for (const value of values) {
-    if (typeof value === 'string' && value.trim()) {
-      return value.trim();
-    }
-  }
+function extractTitle(r) {
+  if (!r || typeof r !== 'object') return '';
+  const t = firstNonEmpty([r.title, r.book_title, r.display_title]);
+  if (t) return t;
+  for (const c of [r.biblio, r._strings, r.metadata]) { const nt = extractTitle(c); if (nt) return nt; }
   return '';
 }
 
-function extractTitle(record) {
-  if (!record || typeof record !== 'object') {
-    return '';
-  }
-
-  const directTitle = firstNonEmpty([
-    record.title,
-    record.book_title,
-    record.display_title,
-    record.subtitle
-  ]);
-  if (directTitle) {
-    return directTitle;
-  }
-
-  const nestedCandidates = [
-    record.biblio,
-    record._strings,
-    record.metadata,
-    record.result
-  ];
-
-  for (const candidate of nestedCandidates) {
-    const nestedTitle = extractTitle(candidate);
-    if (nestedTitle) {
-      return nestedTitle;
-    }
-  }
-
-  return '';
-}
-
-function extractSipField(rawMessage, fieldCode) {
-  if (typeof rawMessage !== 'string' || !rawMessage) {
-    return '';
-  }
-
-  const marker = `|${fieldCode}`;
-  const start = rawMessage.indexOf(marker);
-  if (start === -1) {
-    return '';
-  }
-
-  const valueStart = start + marker.length;
-  const nextPipe = rawMessage.indexOf('|', valueStart);
-  const value = nextPipe === -1
-    ? rawMessage.slice(valueStart)
-    : rawMessage.slice(valueStart, nextPipe);
-
-  return value.trim();
-}
-
-function isUsableSipTitle(value) {
-  const title = String(value || '').trim();
-  if (!title) {
-    return false;
-  }
-
-  return !/^#+$/.test(title);
-}
-
-async function getItemDetails(itemBarcode) {
-  const itemsPayload = await kohaRequest(`/items?external_id=${encodeURIComponent(itemBarcode)}`);
-  const items = normalizeCollection(itemsPayload);
-  const item = findExactMatch(items, 'external_id', itemBarcode);
-  if (!item) {
-    return {
-      itemBarcode,
-      itemTitle: itemBarcode
-    };
-  }
-
-  let itemTitle = firstNonEmpty([
-    extractTitle(item),
-    item.external_id,
-    itemBarcode
-  ]);
-
-  if (item.biblio_id) {
-    try {
-      const biblio = await kohaRequest(`/biblios/${item.biblio_id}`);
-      itemTitle = firstNonEmpty([
-        extractTitle(biblio),
-        itemTitle
-      ]);
-    } catch (error) {
-      itemTitle = itemTitle;
-    }
-  }
-
-  return {
-    itemBarcode,
-    itemTitle
-  };
-}
-
-async function getItemDetailsById(itemId) {
-  if (!itemId) {
-    return {
-      itemBarcode: '',
-      itemTitle: ''
-    };
-  }
-
-  try {
-    const item = await kohaRequest(`/items/${itemId}`);
-    let itemTitle = firstNonEmpty([
-      extractTitle(item),
-      item.external_id,
-      String(itemId)
-    ]);
-
-    if (item.biblio_id) {
-      try {
-        const biblio = await kohaRequest(`/biblios/${item.biblio_id}`);
-        itemTitle = firstNonEmpty([
-          extractTitle(biblio),
-          itemTitle
-        ]);
-      } catch (_) {
-      }
-    }
-
-    return {
-      itemBarcode: firstNonEmpty([
-        item.external_id,
-        item.barcode,
-        ''
-      ]),
-      itemTitle
-    };
-  } catch (_) {
-    return {
-      itemBarcode: '',
-      itemTitle: ''
-    };
-  }
-}
-
-async function getCurrentLoanDetails(itemBarcode) {
-  const itemsPayload = await kohaRequest(`/items?external_id=${encodeURIComponent(itemBarcode)}`);
-  const items = normalizeCollection(itemsPayload);
-  const item = findExactMatch(items, 'external_id', itemBarcode);
-
-  if (!item || !item.item_id) {
-    return {
-      patronName: '',
-      patronCardNumber: '',
-      fineAmount: 0
-    };
-  }
-
-  const checkoutQuery = encodeURIComponent(JSON.stringify({
-    item_id: item.item_id,
-    checkin_date: null
-  }));
-  const checkoutsPayload = await kohaRequest(`/checkouts?q=${checkoutQuery}`);
-  const checkouts = normalizeCollection(checkoutsPayload);
-  const activeCheckout = checkouts.find((checkout) => Number(checkout?.item_id) === Number(item.item_id) && checkout?.checkin_date == null);
-
-  if (!activeCheckout || !activeCheckout.patron_id) {
-    return {
-      patronName: '',
-      patronCardNumber: '',
-      fineAmount: 0
-    };
-  }
-
-  let patronName = '';
-  let patronCardNumber = '';
-  let fineAmount = 0;
-
-  try {
-    const patron = await kohaRequest(`/patrons/${activeCheckout.patron_id}`);
-    patronName = firstNonEmpty([
-      `${patron.firstname || ''} ${patron.surname || ''}`.trim(),
-      patron.cardnumber
-    ]);
-    patronCardNumber = String(patron.cardnumber || '').trim();
-  } catch (error) {
-    patronName = '';
-    patronCardNumber = '';
-  }
-
-  try {
-    const account = await kohaRequest(`/patrons/${activeCheckout.patron_id}/account`);
-    fineAmount = Number(account?.outstanding_debits?.total ?? account?.balance ?? 0) || 0;
-  } catch (error) {
-    fineAmount = 0;
-  }
-
-  return {
-    patronName,
-    patronCardNumber,
-    fineAmount
-  };
-}
-
-async function getActiveCheckoutForItemId(itemId) {
-  if (!itemId) {
-    return null;
-  }
-
-  const checkoutQuery = encodeURIComponent(JSON.stringify({
-    item_id: itemId,
-    checkin_date: null
-  }));
-  const checkoutsPayload = await kohaRequest(`/checkouts?q=${checkoutQuery}`);
-  const checkouts = normalizeCollection(checkoutsPayload);
-  return checkouts.find((checkout) => Number(checkout?.item_id) === Number(itemId) && checkout?.checkin_date == null) || null;
-}
-
-async function getPatronAccountSummary(patronCardNumber) {
-  if (patronCardNumber === 'E0040150111266FC') {
-    logger.info('Patron', `Demo Map: Treating RFID card as Patron 1 (Koha Admin) for testing.`);
-    patronCardNumber = '1';
-  }
-
-  logger.info('Patron', `Searching for patron with identifier: ${patronCardNumber}`);
-  
-  let patron = null;
-  let patronsPayload = null;
-  try {
-     patronsPayload = await kohaRequest(`/patrons?cardnumber=${encodeURIComponent(patronCardNumber)}`);
-     const initialPatrons = normalizeCollection(patronsPayload);
-     patron = findExactMatch(initialPatrons, 'cardnumber', patronCardNumber);
-  } catch (exactError) {
-     logger.error('Patron', `Exact search failed (Koha 500?): ${exactError.message}`);
-  }
-
-  if (!patron) {
-    logger.info('Patron', `Exact cardnumber match failed for ${patronCardNumber}. Trying broad search...`);
-    try {
-        patronsPayload = await kohaRequest(`/patrons?q=${encodeURIComponent(patronCardNumber)}`);
-        const broadPatrons = normalizeCollection(patronsPayload);
-        
-        patron = broadPatrons.find(p => 
-          String(p.cardnumber || '').trim().toUpperCase() === patronCardNumber.toUpperCase() ||
-          String(p.userid || '').trim().toUpperCase() === patronCardNumber.toUpperCase()
-        );
-    } catch (searchError) {
-        logger.error('Patron', `Broad search failed for ${patronCardNumber} (Koha 500?). Error: ${searchError.message}`);
-    }
-  }
-
-  if (!patron) {
-    logger.warn('Patron', `Zero patrons found for identifier: ${patronCardNumber}`);
-    throw new Error(`No patron found with card number ${patronCardNumber}`);
-  }
-
-  logger.info('Patron', `Patron found: ${patron.firstname} ${patron.surname} (ID: ${patron.patron_id})`);
-
-  let fineAmount = 0;
-  try {
-    const account = await kohaRequest(`/patrons/${patron.patron_id}/account`);
-    fineAmount = Number(account?.outstanding_debits?.total ?? account?.balance ?? 0) || 0;
-  } catch (_) {
-    fineAmount = 0;
-  }
-
-  const checkoutsQuery = encodeURIComponent(JSON.stringify({
-    patron_id: patron.patron_id,
-    checkin_date: null
-  }));
-  const checkoutsPayload = await kohaRequest(`/checkouts?q=${checkoutsQuery}`);
-  const checkouts = normalizeCollection(checkoutsPayload)
-    .filter((checkout) => Number(checkout?.patron_id) === Number(patron.patron_id) && checkout?.checkin_date == null);
-
-  const loans = await Promise.all(checkouts.map(async (checkout) => {
-    const itemId = checkout?.item_id;
-    const itemDetails = itemId
-      ? await getItemDetailsById(itemId)
-      : { itemBarcode: '', itemTitle: '' };
-
-    return {
-      itemBarcode: firstNonEmpty([
-        itemDetails.itemBarcode,
-        checkout?.external_id,
-        checkout?.barcode,
-        itemId ? String(itemId) : ''
-      ]),
-      itemTitle: firstNonEmpty([
-        itemDetails.itemTitle,
-        extractTitle(checkout),
-        checkout?.title,
-        checkout?.external_id,
-        itemId ? `Item ${itemId}` : 'Issued Item'
-      ]),
-      dueDate: firstNonEmpty([
-        checkout?.due_date,
-        checkout?.date_due,
-        ''
-      ])
-    };
-  }));
-
-  let holds = [];
-  try {
-    const holdsPayload = await kohaRequest(`/holds?patron_id=${patron.patron_id}`);
-    const rawHolds = normalizeCollection(holdsPayload);
-    holds = await Promise.all(rawHolds.filter(h => !h.cancellation_date).map(async (h) => {
-      let title = `Item ${h.item_id || h.biblio_id}`;
-      if (h.biblio_id) {
-        try {
-          const bib = await kohaRequest(`/biblios/${h.biblio_id}`);
-          title = extractTitle(bib) || title;
-        } catch (_) {}
-      }
-      return {
-        holdId: h.hold_id,
-        biblioId: h.biblio_id,
-        itemId: h.item_id,
-        title,
-        queuePosition: h.priority || 1,
-        status: h.found === 'W' ? 'Ready for Pickup' : h.found === 'T' ? 'In Transit' : 'On Hold',
-        pickupDeadline: h.expirationdate || 'N/A',
-        pickupLibrary: h.pickup_library_id || ''
-      };
-    }));
-  } catch (holdError) {
-    logger.warn('Account', `Could not fetch holds: ${holdError.message}`);
-  }
-
-  return {
-    patronCardNumber,
-    patronName: firstNonEmpty([
-      `${patron.firstname || ''} ${patron.surname || ''}`.trim(),
-      patron.cardnumber
-    ]),
-    fineAmount,
-    loans
-    loans,
-    holds
-  };
-}
-
-async function handleSearch(req, res) {
-  // Add this line to create a fake error: // DEBUG_TEST
-  // throw new Error("DEBUG_TEST: This is a manual crash for testing the logger!");
-
-  const requestId = uuidv4();
-  try {
-    const reqUrl = new URL(req.url, `http://${req.headers.host}`);
-    const query = String(reqUrl.searchParams.get('q') || '').trim().toLowerCase();
-
-    if (!query) {
-      logger.warn('Search', 'Search query is missing', { requestId });
-      sendJson(res, 400, { success: false, message: 'Search query is required' });
-      return;
-    }
-
-    logger.info('Search', `[START] Book search initiated for: "${query}"`, { requestId });
-    
-    logger.info('Database', 'Fetching bibliography list from Koha', { requestId });
-    const searchPayload = await kohaRequest('/biblios?_per_page=1000');
-    const biblios = Array.isArray(searchPayload) ? searchPayload : [];
-    
-    logger.info('Search', `Filtering ${biblios.length} records for matches`, { requestId });
-    const matchedBiblios = biblios.filter(b => {
-      const title = String(b.title || '').toLowerCase();
-      const author = String(b.author || '').toLowerCase();
-      const isbn = String(b.isbn || '').toLowerCase();
-      return title.includes(query) || author.includes(query) || isbn.includes(query);
-    });
-    
-    const results = matchedBiblios.slice(0, 50).map(b => ({
-      title: b.title,
-      author: b.author,
-      barcode: b.external_id || b.isbn || 'N/A',
-      status: 'available'
-    }));
-
-    logger.info('Search', `[SUCCESS] Found ${results.length} matches`, { requestId });
-    sendJson(res, 200, { success: true, data: results });
-  } catch (error) {
-    logger.error('Search', `[FAIL] Search failed: ${error.message}`, { requestId, error });
-    
-    logger.info('Search', 'Switching to offline fallback search results', { requestId });
-    const mockDb = [
-        { barcode: '123456789', title: 'Introduction to Programming', author: 'John Smith', status: 'available' },
-        { barcode: '987654321', title: 'Advanced Algorithms', author: 'Jane Doe', status: 'available' },
-        { barcode: '111222333', title: 'Database Design', author: 'Bob Johnson', status: 'available' },
-        { barcode: '444555666', title: 'Web Development', author: 'Alice Williams', status: 'checked_out' }
-    ];
-    const results = mockDb.filter(i => 
-        i.title.toLowerCase().includes(query) || 
-        i.author.toLowerCase().includes(query) ||
-        i.barcode.includes(query)
-    );
-    
-    sendJson(res, 200, { success: true, data: results, fallback: true, error: error.message });
-  }
-}
-
-async function handleAccount(req, res) {
-  const requestId = uuidv4();
-  try {
-    const reqUrl = new URL(req.url, `http://${req.headers.host}`);
-    const patronCardNumber = String(reqUrl.searchParams.get('cardnumber') || '').trim();
-
-    if (!patronCardNumber) {
-      logger.warn('Account', 'Card number missing in account request', { requestId });
-      sendJson(res, 400, {
-        success: false,
-        message: 'cardnumber query param is required'
-      });
-      return;
-    }
-
-    logger.info('Account', `[START] Fetching account details for Patron: ${patronCardNumber}`, { requestId });
-    const data = await getPatronAccountSummary(patronCardNumber);
-    logger.info('Account', `[SUCCESS] Account details retrieved for ${data.patronName}`, {
-      requestId,
-      patronCardNumber,
-      loansCount: data.loans.length,
-      fineAmount: data.fineAmount
-    });
-
-    sendJson(res, 200, {
-      success: true,
-      data
-    });
-  } catch (error) {
-    logger.error('Account', `[FAIL] Account retrieval failed: ${error.message}`, { requestId, error });
-    const statusCode = /No patron found/i.test(error.message) ? 404 : 500;
-    sendJson(res, statusCode, {
-      success: false,
-      message: error.message || 'Unable to fetch account details'
-    });
-  }
-}
-
-async function handlePlaceHold(req, res) {
-  const requestId = uuidv4();
-  try {
-    const body = await parseRequestBody(req);
-    const patronCardNumber = String(body.patronCardNumber || '').trim();
-    const barcode = String(body.barcode || '').trim();
-
-    if (!patronCardNumber || !barcode) {
-      sendJson(res, 400, { success: false, message: 'Card number and barcode are required' });
-      return;
-    }
-
-    logger.info('Hold', `[START] Placing hold for ${patronCardNumber} on ${barcode}`, { requestId });
-
-    // Find Patron
-    let patronsPayload = await kohaRequest(`/patrons?cardnumber=${encodeURIComponent(patronCardNumber)}`);
-    let patrons = normalizeCollection(patronsPayload);
-    let patron = findExactMatch(patrons, 'cardnumber', patronCardNumber);
-    if (!patron) {
-      patronsPayload = await kohaRequest(`/patrons?q=${encodeURIComponent(patronCardNumber)}`);
-      patrons = normalizeCollection(patronsPayload);
-      patron = patrons.find(p => String(p.cardnumber || '').trim() === patronCardNumber) || null;
-    }
-    if (!patron) {
-      sendJson(res, 404, { success: false, message: 'Patron not found' });
-      return;
-    }
-
-    // Find item
-    const itemsPayload = await kohaRequest(`/items?external_id=${encodeURIComponent(barcode)}`);
-    const items = normalizeCollection(itemsPayload);
-    const item = findExactMatch(items, 'external_id', barcode) || items[0];
-    if (!item) {
-      sendJson(res, 404, { success: false, message: 'Item not found' });
-      return;
-    }
-
-    const holdPayload = {
-      patron_id: patron.patron_id,
-      biblio_id: item.biblio_id,
-      pickup_library_id: KOHA_CONFIG.libraryId || 'CPL'
-    };
-
-    const response = await kohaPost('/holds', holdPayload);
-    logger.info('Hold', `[SUCCESS] Hold placed for ${patronCardNumber}`, { requestId, holdId: response.hold_id });
-    sendJson(res, 200, { success: true, message: 'Hold placed successfully', hold: response });
-  } catch (error) {
-    logger.error('Hold', `[FAIL] Failed to place hold: ${error.message}`, { requestId });
-    sendJson(res, 500, { success: false, message: error.message || 'Failed to place hold' });
-  }
-}
-
-async function handleCheckout(req, res) {
-  const requestId = uuidv4();
-  try {
-    const body = await parseRequestBody(req);
-    const patronCardNumber = String(body.patronCardNumber || '').trim();
-    const rfidUid = normalizeRfidUid(body.rfidUid);
-    const submittedBarcode = normalizeItemBarcode(body.itemBarcode);
-    const itemBarcode = resolveItemBarcode(submittedBarcode, rfidUid);
-
-    logger.info('Checkout', `[START] Checkout initiated for Patron: ${patronCardNumber}, Item: ${itemBarcode}`, {
-      requestId,
-      patronCardNumber,
-      itemBarcode,
-      rfidUid
-    });
-
-    if (!patronCardNumber || !itemBarcode) {
-      logger.warn('Checkout', '[FAIL] Missing required fields for checkout', { requestId, patronCardNumber, itemBarcode });
-      sendJson(res, 400, {
-        success: false,
-        message: 'Patron card number and item barcode are required'
-      });
-      return;
-    }
-
-    logger.info('Patron', `Searching for patron: ${patronCardNumber}`, { requestId });
-    let patronsPayload = await kohaRequest(`/patrons?cardnumber=${encodeURIComponent(patronCardNumber)}`);
-    let patrons = normalizeCollection(patronsPayload);
-    let patron = findExactMatch(patrons, 'cardnumber', patronCardNumber);
-    if (!patron) {
-      logger.warn('Patron', `Patron not found: ${patronCardNumber}`, { requestId });
-      sendJson(res, 404, {
-        success: false,
-        message: `No patron found with card number ${patronCardNumber}`
-      });
-      return;
-    }
-    logger.info('Patron', `Patron identified: ${patron.firstname} ${patron.surname}`, { requestId, patronId: patron.patron_id });
-
-    logger.info('Database', `Fetching item details: ${itemBarcode}`, { requestId });
-    const itemsPayload = await kohaRequest(`/items?external_id=${encodeURIComponent(itemBarcode)}`);
-    const items = normalizeCollection(itemsPayload);
-    const item = findExactMatch(items, 'external_id', itemBarcode);
-    if (!item) {
-      logger.warn('Database', `Item not found: ${itemBarcode}`, { requestId });
-      sendJson(res, 404, {
-        success: false,
-        message: `No item found with barcode ${itemBarcode}`
-      });
-      return;
-    }
-    const itemDetails = await getItemDetails(itemBarcode);
-    const libraryId = firstNonEmpty([
-      item.home_library_id,
-      item.holding_library_id,
-      KOHA_CONFIG.libraryId
-    ]);
-
-    logger.info('Checkout', `Registering checkout in Koha for Item: ${item.item_id}`, { requestId });
-    let checkout = null;
-    try {
-      checkout = await kohaPost('/checkouts', {
-        patron_id: patron.patron_id,
-        item_id: item.item_id,
-        library_id: libraryId
-      });
-      logger.info('Checkout', 'Database transaction successful', { requestId, checkoutId: checkout.checkout_id });
-    } catch (postError) {
-      if (!isKohaConfirmationError(postError)) {
-        logger.error('Checkout', `Database transaction failed: ${postError.message}`, { requestId, error: postError });
-        throw postError;
-      }
-
-      logger.warn('Checkout', 'Koha returned confirmation error, attempting recovery...', { requestId });
-      const activeCheckout = await getActiveCheckoutForItemId(item.item_id);
-      const samePatronLoan = activeCheckout && Number(activeCheckout.patron_id) === Number(patron.patron_id);
-      if (!samePatronLoan) {
-        logger.error('Checkout', 'Recovery failed: item checked out by different patron', { requestId });
-        throw postError;
-      }
-
-      checkout = activeCheckout;
-      logger.info('Checkout', 'Recovery successful: existing loan found for same patron', { requestId });
-    }
-
-    let securityUpdate = null;
-    try {
-      logger.info('RFID', `[WRITE] Attempting security update (AFI: 00) for Barcode: ${itemBarcode}`, { requestId, uid: rfidUid });
-      securityUpdate = await writeRfidSecurityState({
-        barcode: itemBarcode,
-        uid: rfidUid,
-        afi: '00',
-        state: 'Unsecure'
-      });
-      
-      if (securityUpdate.success) {
-        logger.info('RFID', 'RFID write successful', { requestId, result: securityUpdate });
-      } else {
-        logger.warn('RFID', `RFID write failed: ${securityUpdate.message}`, { requestId, result: securityUpdate });
-      }
-    } catch (securityError) {
-      securityUpdate = {
-        success: false,
-        message: securityError.message
-      };
-      logger.error('RFID', `RFID write error: ${securityError.message}`, { requestId, error: securityError });
-    }
-
-    sendJson(res, 200, {
-      success: true,
-      message: 'Item checked out successfully',
-      data: {
-        checkoutId: checkout.checkout_id,
-        patronCardNumber,
-        patronName: `${patron.firstname || ''} ${patron.surname || ''}`.trim(),
-        itemBarcode,
-        itemTitle: itemDetails.itemTitle,
-        checkoutDate: checkout.checkout_date || new Date().toISOString(),
-        dueDate: checkout.due_date || '',
-        securityUpdate
-      },
-      securityUpdate
-    });
-    
-    rememberRfidUidBarcode(rfidUid, itemBarcode);
-    logger.info('Checkout', `[SUCCESS] Checkout completed for Item: ${itemBarcode}`, { requestId });
-  } catch (error) {
-    logger.error('Checkout', `[CRITICAL] Checkout process failed: ${error.message}`, { requestId, stack: error.stack });
-    sendJson(res, 500, {
-      success: false,
-      message: error.message || 'Checkout failed'
-    });
-  }
-}
-
-
-async function handleCheckin(req, res) {
-  const requestId = uuidv4();
-  try {
-    const body = await parseRequestBody(req);
-    const rfidUid = normalizeRfidUid(body.rfidUid);
-    const submittedBarcode = normalizeItemBarcode(body.itemBarcode);
-    const itemBarcode = resolveItemBarcode(submittedBarcode, rfidUid);
-
-    logger.info('Checkin', `[START] Check-in initiated for Item: ${itemBarcode}`, {
-      requestId,
-      itemBarcode,
-      rfidUid
-    });
-
-    if (!itemBarcode) {
-      logger.warn('Checkin', '[FAIL] Missing item barcode for check-in', { requestId });
-      sendJson(res, 400, {
-        success: false,
-        message: 'Book number is required'
-      });
-      return;
-    }
-
-    logger.info('Database', `Fetching item details: ${itemBarcode}`, { requestId });
-    const itemDetails = await getItemDetails(itemBarcode);
-    
-    let loanDetails = {
-      patronName: '',
-      patronCardNumber: '',
-      fineAmount: 0
-    };
-    try {
-      logger.info('Database', `Looking up current loan for: ${itemBarcode}`, { requestId });
-      loanDetails = await getCurrentLoanDetails(itemBarcode);
-      if (loanDetails.patronCardNumber) {
-        logger.info('Database', `Active loan found for Patron: ${loanDetails.patronCardNumber}`, { requestId });
-      } else {
-        logger.warn('Database', 'No active loan found for this item', { requestId });
-      }
-    } catch (loanError) {
-      logger.error('Database', `Loan lookup failed: ${loanError.message}`, { requestId, error: loanError });
-    }
-
-    logger.info('SIP2', `[ACTION] Sending check-in command for: ${itemBarcode}`, { requestId });
-    const result = await sipCheckin(itemBarcode);
-    
-    if (!result.ok) {
-      logger.error('SIP2', `[FAIL] SIP2 check-in failed for ${itemBarcode}`, { requestId, response: result });
-      sendJson(res, 500, {
-        success: false,
-        message: result.message || 'SIP2 check-in failed',
-        raw: result.raw
-      });
-      return;
-    }
-    logger.info('SIP2', `[SUCCESS] SIP2 check-in confirmed for: ${itemBarcode}`, { requestId });
-
-    const sipTitleCandidate = extractSipField(result.raw, 'AJ');
-    const sipTitle = isUsableSipTitle(sipTitleCandidate)
-      ? sipTitleCandidate
-      : '';
-
-    const finalTitle = firstNonEmpty([
-      itemDetails.itemTitle,
-      sipTitle,
-      extractSipField(result.raw, 'AB'),
-      itemBarcode
-    ]);
-
-    let securityUpdate = null;
-    try {
-      logger.info('RFID', `[WRITE] Attempting security update (AFI: 90) for Barcode: ${itemBarcode}`, { requestId, uid: rfidUid });
-      securityUpdate = await writeRfidSecurityState({
-        barcode: itemBarcode,
-        uid: rfidUid,
-        afi: '90',
-        state: 'Secure'
-      });
-      
-      if (securityUpdate.success) {
-        logger.info('RFID', 'RFID write successful', { requestId, result: securityUpdate });
-      } else {
-        logger.warn('RFID', `RFID write failed: ${securityUpdate.message}`, { requestId, result: securityUpdate });
-      }
-    } catch (securityError) {
-      securityUpdate = {
-        success: false,
-        message: securityError.message
-      };
-      logger.error('RFID', `RFID write error: ${securityError.message}`, { requestId, error: securityError });
-    }
-
-    sendJson(res, 200, {
-      success: true,
-      message: 'Book checked in successfully',
-      data: {
-        itemBarcode: itemDetails.itemBarcode,
-        itemTitle: finalTitle,
-        patronName: loanDetails.patronName,
-        patronCardNumber: loanDetails.patronCardNumber,
-        fineAmount: loanDetails.fineAmount,
-        checkinDate: new Date().toISOString(),
-        raw: result.raw,
-        securityUpdate
-      },
-      securityUpdate
-    });
-    
-    rememberRfidUidBarcode(rfidUid, itemBarcode);
-    logger.info('Checkin', `[SUCCESS] Check-in completed for Item: ${itemBarcode}`, { requestId });
-  } catch (error) {
-    logger.error('Checkin', `[CRITICAL] Check-in process failed: ${error.message}`, { requestId, stack: error.stack });
-    sendJson(res, 500, {
-      success: false,
-      message: error.message || 'Check-in failed'
-    });
-  }
-}
-
-
-// ─── Renew Module ─────────────────────────────────────────────────────────────
-
-function parseKohaRenewalError(error) {
-  const raw = String(error?.message || error || '').trim();
-
-  // Try to parse JSON error body from Koha
-  let errorCode = '';
-  let errorMsg = '';
-  try {
-    const parsed = JSON.parse(raw);
-    errorCode = String(parsed.error || parsed.code || parsed.reason || '').toLowerCase();
-    errorMsg  = String(parsed.error || parsed.message || '').toLowerCase();
-  } catch (_) {
-    errorCode = raw.toLowerCase();
-    errorMsg  = raw.toLowerCase();
-  }
-
-  const combined = `${errorCode} ${errorMsg} ${raw.toLowerCase()}`;
-
-  if (/too_many|too many|max_renewals|maximum renewal/i.test(combined)) {
-    return 'Maximum renewal limit reached for this item.';
-  }
-  if (/on_hold|hold|reserved/i.test(combined)) {
-    return "This item can't be renewed because another patron has requested it.";
-  }
-  if (/not_renewable|not renewable/i.test(combined)) {
-    return 'This item is not eligible for renewal.';
-  }
-  if (/not_checked_out|not checked.?out/i.test(combined)) {
-    return 'This item is not currently checked out.';
-  }
-  if (/not_same_patron|wrong patron|different patron/i.test(combined)) {
-    return 'This item is not issued to this patron.';
-  }
-  if (/account_expired|patron expired|expired/i.test(combined)) {
-    return 'Patron account has expired. Please contact the library staff.';
-  }
-  if (/fine|overdue|fee/i.test(combined)) {
-    return 'Renewal blocked due to outstanding fines. Please contact staff.';
-  }
-  if (/auto_renew/i.test(combined)) {
-    return 'This item is set to auto-renew and cannot be renewed manually.';
-  }
-
-  return 'Renewal failed. Please contact staff.';
-}
-
-async function kohaRenewItem(checkoutId) {
-  // Koha REST API: POST /checkouts/{checkout_id}/renewal
-  const url = new URL(`${KOHA_CONFIG.baseUrl}/checkouts/${checkoutId}/renewal`);
-  const authHeader = 'Basic ' + Buffer.from(`${KOHA_CONFIG.username}:${KOHA_CONFIG.password}`).toString('base64');
-  const body = '{}';
-
-  return new Promise((resolve, reject) => {
-    const request = http.request(
-      {
-        hostname: url.hostname,
-        port: url.port || 80,
-        path: `${url.pathname}${url.search}`,
-        method: 'POST',
-        headers: {
-          Authorization: authHeader,
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body)
-        }
-      },
-      (response) => {
-        let responseBody = '';
-        response.on('data', (chunk) => { responseBody += chunk.toString('utf8'); });
-        response.on('end', () => {
-          if (response.statusCode < 200 || response.statusCode >= 300) {
-            const err = new Error(responseBody || `Koha renewal failed (status ${response.statusCode})`);
-            err.statusCode = response.statusCode;
-            reject(err);
-            return;
-          }
-          try {
-            resolve(responseBody ? JSON.parse(responseBody) : {});
-          } catch (_) {
-            resolve({});
-          }
-        });
-      }
-    );
-    request.on('error', (e) => reject(new Error(`Koha renewal connection error: ${e.message}`)));
-    request.write(body);
-    request.end();
-  });
-}
-
-async function handleRenew(req, res) {
-  const requestId = uuidv4();
-  try {
-    const body = await parseRequestBody(req);
-    const patronCardNumber = String(body.patronCardNumber || '').trim();
-    const itemBarcode     = normalizeItemBarcode(body.itemBarcode);
-
-    logger.info('Renew', `[START] Renewal requested — Patron: ${patronCardNumber}, Item: ${itemBarcode}`, { requestId });
-
-    if (!patronCardNumber || !itemBarcode) {
-      sendJson(res, 400, { success: false, message: 'Patron card number and item barcode are required' });
-      return;
-    }
-
-    // 1. Look up patron
-    const patronsPayload = await kohaRequest(`/patrons?cardnumber=${encodeURIComponent(patronCardNumber)}`);
-    const patrons = normalizeCollection(patronsPayload);
-    const patron  = findExactMatch(patrons, 'cardnumber', patronCardNumber);
-    if (!patron) {
-      logger.warn('Renew', `Patron not found: ${patronCardNumber}`, { requestId });
-      sendJson(res, 404, { success: false, message: `No patron found with card number ${patronCardNumber}` });
-      return;
-    }
-    logger.info('Renew', `Patron identified: ${patron.firstname} ${patron.surname}`, { requestId, patronId: patron.patron_id });
-
-    // 2. Look up item
-    const itemsPayload = await kohaRequest(`/items?external_id=${encodeURIComponent(itemBarcode)}`);
-    const items = normalizeCollection(itemsPayload);
-    const item  = findExactMatch(items, 'external_id', itemBarcode);
-    if (!item) {
-      logger.warn('Renew', `Item not found: ${itemBarcode}`, { requestId });
-      sendJson(res, 404, { success: false, message: `No item found with barcode ${itemBarcode}` });
-      return;
-    }
-    const itemDetails = await getItemDetails(itemBarcode);
-
-    // 3. Find active checkout for this item
-    const activeCheckout = await getActiveCheckoutForItemId(item.item_id);
-    if (!activeCheckout) {
-      logger.warn('Renew', `No active checkout for item: ${itemBarcode}`, { requestId });
-      sendJson(res, 409, { success: false, message: 'This item is not currently checked out.' });
-      return;
-    }
-
-    // 4. Verify the checkout belongs to this patron
-    if (Number(activeCheckout.patron_id) !== Number(patron.patron_id)) {
-      logger.warn('Renew', `Item belongs to a different patron`, { requestId, itemPatronId: activeCheckout.patron_id, requestPatron: patron.patron_id });
-      sendJson(res, 403, { success: false, message: 'This item is not issued to this patron.' });
-      return;
-    }
-
-    // 5. Call Koha renewal API — policy is fully governed by Koha circulation rules
-    logger.info('Renew', `Requesting Koha renewal for checkout_id: ${activeCheckout.checkout_id}`, { requestId });
-    let renewalResult;
-    try {
-      renewalResult = await kohaRenewItem(activeCheckout.checkout_id);
-    } catch (kohaError) {
-      const friendlyMsg = parseKohaRenewalError(kohaError);
-      logger.warn('Renew', `Koha renewal denied: ${kohaError.message}`, { requestId });
-      sendJson(res, 422, { success: false, message: friendlyMsg });
-      return;
-    }
-
-    const newDueDate = firstNonEmpty([
-      renewalResult?.due_date,
-      renewalResult?.dueDate,
-      renewalResult?.date_due,
-      ''
-    ]);
-
-    logger.info('Renew', `[SUCCESS] Renewal completed — new due date: ${newDueDate}`, { requestId, itemBarcode, patronCardNumber });
-    sendJson(res, 200, {
-      success: true,
-      message: 'Item renewed successfully.',
-      data: {
-        patronCardNumber,
-        patronName: `${patron.firstname || ''} ${patron.surname || ''}`.trim(),
-        itemBarcode,
-        itemTitle: itemDetails.itemTitle,
-        newDueDate
-      }
-    });
-
-  } catch (error) {
-    logger.error('Renew', `[CRITICAL] Renewal failed: ${error.message}`, { requestId, stack: error.stack });
-    sendJson(res, 500, { success: false, message: error.message || 'Renewal failed' });
-  }
-}
-
-// ─── End Renew Module ──────────────────────────────────────────────────────────
-
-// ─── Renew Batch & Items-Out ─────────────────────────────────────────────────
-
-/**
- * Converts a raw Koha non-renewable error code into a short patron-facing label.
- * Does NOT hardcode policy — only translates known code strings to friendly text.
- */
-function mapRenewalReasonToLabel(errorCode) {
-  const code = String(errorCode || '').toLowerCase();
-  if (/too_many|max_renewals|maximum/.test(code))      return 'Maximum renewals reached';
-  if (/on_hold|hold|reserved/.test(code))              return 'On hold for another patron';
-  if (/not_renewable/.test(code))                      return 'Item not renewable';
-  if (/not_checked_out/.test(code))                    return 'Item not checked out';
-  if (/not_same_patron/.test(code))                    return 'Account not eligible';
-  if (/account_expired|patron_expired|expired/.test(code)) return 'Account not eligible';
-  if (/fine|overdue/.test(code))                       return 'Account not eligible';
-  if (/auto_renew/.test(code))                         return 'Renewal not allowed yet';
-  if (/restricted|blocked/.test(code))                 return 'Account not eligible';
-  if (code)                                            return 'Item not renewable';
-  return 'Unknown restriction';
-}
-
-/**
- * Shared patron lookup for the renew flow (with fallback search and RFID demo mapping).
- * Does NOT modify any existing patron functions.
- */
-async function getPatronForRenew(patronCardNumber) {
-  // Demo/RFID mapping — same as getPatronAccountSummary
-  if (patronCardNumber === 'E0040150111266FC') {
-    patronCardNumber = '1';
-  }
-
-  let patron = null;
-
-  try {
-    const payload = await kohaRequest(`/patrons?cardnumber=${encodeURIComponent(patronCardNumber)}`);
-    patron = findExactMatch(normalizeCollection(payload), 'cardnumber', patronCardNumber);
-  } catch (_) {}
-
-  if (!patron) {
-    try {
-      const payload = await kohaRequest(`/patrons?q=${encodeURIComponent(patronCardNumber)}`);
-      const patrons = normalizeCollection(payload);
-      patron = patrons.find((p) =>
-        String(p.cardnumber || '').trim().toUpperCase() === patronCardNumber.toUpperCase() ||
-        String(p.userid || '').trim().toUpperCase() === patronCardNumber.toUpperCase()
-      );
-    } catch (_) {}
-  }
-
-  return patron;
-}
-
-/**
- * GET /api/renew/items?cardnumber=...
- * Returns patron info + all active checkouts classified as renewable/not-renewable.
- * Uses Koha's GET /checkouts/{id}/renewability if available (Koha 22.11+);
- * silently falls back to marking items as renewable=null (unknown) if not.
- */
-async function handleRenewItemsOut(req, res) {
-  const requestId = uuidv4();
-  try {
-    const reqUrl = new URL(req.url, `http://${req.headers.host}`);
-    const patronCardNumber = String(reqUrl.searchParams.get('cardnumber') || '').trim();
-
-    if (!patronCardNumber) {
-      sendJson(res, 400, { success: false, message: 'cardnumber is required' });
-      return;
-    }
-
-    logger.info('Renew', `[ITEMS OUT] Fetching items for patron: ${patronCardNumber}`, { requestId });
-
-    const patron = await getPatronForRenew(patronCardNumber);
-    if (!patron) {
-      sendJson(res, 404, { success: false, message: `No patron found with card number ${patronCardNumber}` });
-      return;
-    }
-
-    logger.info('Renew', `Patron found: ${patron.firstname} ${patron.surname}`, { requestId });
-
-    // Fetch all active checkouts for this patron
-    const checkoutsQuery = encodeURIComponent(JSON.stringify({ patron_id: patron.patron_id, checkin_date: null }));
-    const checkoutsPayload = await kohaRequest(`/checkouts?q=${checkoutsQuery}`);
-    const checkouts = normalizeCollection(checkoutsPayload)
-      .filter((c) => Number(c?.patron_id) === Number(patron.patron_id) && c?.checkin_date == null);
-
-    logger.info('Renew', `Found ${checkouts.length} active checkouts`, { requestId });
-
-    // Resolve item details + renewability precheck in parallel
-    const itemPromises = checkouts.map(async (checkout) => {
-      const itemId = checkout.item_id;
-      let itemTitle = '';
-      let itemBarcode = '';
-
-      try {
-        const details = await getItemDetailsById(itemId);
-        itemTitle = details.itemTitle || '';
-        itemBarcode = details.itemBarcode || '';
-      } catch (_) {}
-
-      itemBarcode = itemBarcode || firstNonEmpty([
-        checkout.external_id,
-        checkout.barcode,
-        itemId ? String(itemId) : ''
-      ]);
-      itemTitle = itemTitle || itemBarcode || `Item ${itemId}`;
-
-      const dueDate = firstNonEmpty([checkout.due_date, checkout.date_due, '']);
-
-      // Renewability precheck — uses Koha REST if available, else null = unknown
-      let renewable = null;         // null means unknown — UI should treat as renewable
-      let notRenewableReason = '';
-      let renewalsRemaining = null;
-
-      try {
-        const renewCheck = await kohaRequest(`/checkouts/${checkout.checkout_id}/renewability`);
-        renewable = renewCheck.renewable === true || String(renewCheck.renewable).toLowerCase() === 'true';
-        if (!renewable) {
-          notRenewableReason = mapRenewalReasonToLabel(renewCheck.error || renewCheck.reason || '');
-        }
-        // Renewals remaining — only if both fields are reliably numeric from Koha
-        if (typeof renewCheck.renewals_allowed === 'number' && typeof renewCheck.renewals_count === 'number') {
-          renewalsRemaining = Math.max(0, renewCheck.renewals_allowed - renewCheck.renewals_count);
-        }
-      } catch (precheckError) {
-        // Endpoint missing (Koha < 22.11) or transient failure — fall back to unknown
-        renewable = null;
-        logger.warn('Renew', `Renewability precheck skipped for checkout ${checkout.checkout_id}: ${precheckError.message}`, { requestId });
-      }
-
-      return { checkoutId: checkout.checkout_id, itemId, itemBarcode, itemTitle, dueDate, renewable, notRenewableReason, renewalsRemaining };
-    });
-
-    const items = await Promise.all(itemPromises);
-    logger.info('Renew', `[ITEMS OUT] Classified ${items.length} items`, { requestId });
-
-    sendJson(res, 200, {
-      success: true,
-      data: {
-        patronName: firstNonEmpty([`${patron.firstname || ''} ${patron.surname || ''}`.trim(), patron.cardnumber]),
-        patronCardNumber,
-        items
-      }
-    });
-  } catch (error) {
-    logger.error('Renew', `[ITEMS OUT FAIL] ${error.message}`, { requestId, stack: error.stack });
-    const statusCode = /No patron found/i.test(error.message) ? 404 : 500;
-    sendJson(res, statusCode, { success: false, message: error.message || 'Failed to fetch items' });
-  }
-}
-
-/**
- * POST /api/renew/batch
- * Body: { patronCardNumber, barcodes: ["BC001", "BC002"] }
- * Renews each item sequentially against Koha; supports partial success.
- * Each result: { barcode, ok, itemTitle, newDueDate, message }
- */
-async function handleRenewBatch(req, res) {
-  const requestId = uuidv4();
-  try {
-    const body = await parseRequestBody(req);
-    const patronCardNumber = String(body.patronCardNumber || '').trim();
-    const barcodes = Array.isArray(body.barcodes)
-      ? body.barcodes.map((b) => String(b).trim()).filter(Boolean)
-      : [];
-
-    if (!patronCardNumber) {
-      sendJson(res, 400, { success: false, message: 'patronCardNumber is required' });
-      return;
-    }
-    if (barcodes.length === 0) {
-      sendJson(res, 400, { success: false, message: 'barcodes array is required and must not be empty' });
-      return;
-    }
-
-    logger.info('Renew', `[BATCH START] patron=${patronCardNumber}, count=${barcodes.length}`, { requestId });
-
-    const patron = await getPatronForRenew(patronCardNumber);
-    if (!patron) {
-      sendJson(res, 404, { success: false, message: `No patron found with card number ${patronCardNumber}` });
-      return;
-    }
-
-    // Process each barcode sequentially to avoid race conditions on the same patron
-    const results = [];
-    for (const barcode of barcodes) {
-      const result = { barcode, ok: false, itemTitle: barcode, message: '', newDueDate: '' };
-
-      try {
-        const itemsPayload = await kohaRequest(`/items?external_id=${encodeURIComponent(barcode)}`);
-        const item = findExactMatch(normalizeCollection(itemsPayload), 'external_id', barcode);
-
-        if (!item) {
-          result.message = 'Item not found.';
-          results.push(result);
-          continue;
-        }
-
-        try {
-          const details = await getItemDetails(barcode);
-          result.itemTitle = details.itemTitle || barcode;
-        } catch (_) {}
-
-        const activeCheckout = await getActiveCheckoutForItemId(item.item_id);
-        if (!activeCheckout) {
-          result.message = 'This item is not currently checked out.';
-          results.push(result);
-          continue;
-        }
-
-        if (Number(activeCheckout.patron_id) !== Number(patron.patron_id)) {
-          result.message = 'This item is not issued to this patron.';
-          results.push(result);
-          continue;
-        }
-
-        try {
-          const renewalResult = await kohaRenewItem(activeCheckout.checkout_id);
-          result.ok = true;
-          result.message = 'Renewed successfully';
-          result.newDueDate = firstNonEmpty([renewalResult?.due_date, renewalResult?.dueDate, renewalResult?.date_due, '']);
-          logger.info('Renew', `[BATCH] Renewed: ${barcode}`, { requestId });
-        } catch (kohaError) {
-          result.message = parseKohaRenewalError(kohaError);
-          logger.warn('Renew', `[BATCH] Renewal denied for ${barcode}: ${kohaError.message}`, { requestId });
-        }
-      } catch (itemError) {
-        result.message = itemError.message || 'Renewal failed. Please contact staff.';
-        logger.error('Renew', `[BATCH] Error processing ${barcode}: ${itemError.message}`, { requestId });
-      }
-
-      results.push(result);
-    }
-
-    const successCount = results.filter((r) => r.ok).length;
-    logger.info('Renew', `[BATCH DONE] ${successCount}/${barcodes.length} renewed`, { requestId });
-    sendJson(res, 200, { success: true, results });
-  } catch (error) {
-    logger.error('Renew', `[BATCH CRITICAL] ${error.message}`, { requestId, stack: error.stack });
-    sendJson(res, 500, { success: false, message: error.message || 'Batch renewal failed' });
-  }
-}
-
-// ─── End Renew Batch & Items-Out ─────────────────────────────────────────────
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  QR RECEIPT MODULE — Renew Flow Only
-//  New, isolated endpoints:
-//    POST /api/receipt/qr
-//    GET  /receipt/pdf/:token
-//    GET  /api/receipt/qr-status/:token
-//
-//  Does NOT modify any existing Check-In / Check-Out / Account endpoints.
-//  No shared service is changed — pdfkit usage is local to this module.
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const QR_TOKEN_TTL_SEC  = 180;
-const QR_TEMP_DIR       = path.join(__dirname, 'tmp', 'receipts');
-const RECEIPT_PUBLIC_BASE_URL = (process.env.RECEIPT_PUBLIC_BASE_URL || '').trim();
-const RECEIPT_LOCAL_BASE_URL  = (process.env.RECEIPT_LOCAL_BASE_URL  || '').trim();
-
-// Ensure temp directory exists
-try { fs.mkdirSync(QR_TEMP_DIR, { recursive: true }); } catch (_) {}
-
-/** In-memory token store: token -> { txData, pdfPath, downloaded, expiresAt } */
-const QR_TOKENS = new Map();
-
-/** Generate cryptographically random URL-safe token */
-function generateQrToken() {
-  return crypto.randomBytes(24).toString('hex');
-}
-
-/** Auto-detect the kiosk's LAN IPv4 address (first non-loopback, non-link-local) */
+// --- Domain Helpers ---
 function getLanIp() {
-  const ifaces = os.networkInterfaces();
-  for (const name of Object.keys(ifaces)) {
-    for (const iface of ifaces[name]) {
-      if (
-        iface.family === 'IPv4' &&
-        !iface.internal &&                    // skip 127.x.x.x
-        !iface.address.startsWith('169.254')  // skip link-local
-      ) {
-        return iface.address;  // e.g. 192.168.1.147
-      }
+  const nets = os.networkInterfaces();
+  for (const n of Object.keys(nets)) {
+    for (const net of nets[n]) {
+      if (net.family === 'IPv4' && !net.internal) return net.address;
     }
   }
   return null;
 }
 
-/** Choose the base URL for the QR link */
-function resolveReceiptBaseUrl(req) {
-  if (RECEIPT_PUBLIC_BASE_URL) return { url: RECEIPT_PUBLIC_BASE_URL, localOnly: false };
-  if (RECEIPT_LOCAL_BASE_URL)  return { url: RECEIPT_LOCAL_BASE_URL,  localOnly: true  };
-
-  // Auto-detect LAN IP so the QR URL is reachable from phones on the same Wi-Fi.
-  // NEVER fall back to 127.0.0.1 (loopback) — that only works on this machine.
-  const lanIp = getLanIp();
-  if (lanIp) return { url: `http://${lanIp}:${PORT}`, localOnly: true };
-
-  // Last resort (packaged app on unusual network): use hostname
-  const host = req.headers.host || `localhost:${PORT}`;
-  return { url: `http://${host}`, localOnly: true };
+async function getPatronForRenew(card) {
+  if (card === 'E0040150111266FC') card = '1';
+  let p = null;
+  try {
+    const ps = normalizeCollection(await kohaRequest(`/patrons?cardnumber=${encodeURIComponent(card)}`));
+    p = findExactMatch(ps, 'cardnumber', card);
+  } catch (_) {}
+  if (!p) {
+    try {
+      const ps = normalizeCollection(await kohaRequest(`/patrons?q=${encodeURIComponent(card)}`));
+      p = ps.find(x => String(x.cardnumber || '').trim().toUpperCase() === card.toUpperCase() || String(x.userid || '').trim().toUpperCase() === card.toUpperCase());
+    } catch (_) {}
+  }
+  return p;
 }
 
-/** Generate a PDF receipt buffer using pdfkit */
+async function getActiveCheckoutForItemId(itemId) {
+  try {
+    const cos = normalizeCollection(await kohaRequest(`/checkouts?q=${encodeURIComponent(JSON.stringify({ item_id: itemId, checkin_date: null }))}`));
+    return cos[0] || null;
+  } catch (_) { return null; }
+}
+
+async function getItemDetails(bc) {
+  try {
+    const items = normalizeCollection(await kohaRequest(`/items?external_id=${encodeURIComponent(bc)}`));
+    const item = findExactMatch(items, 'external_id', bc);
+    if (!item) return { itemBarcode: bc, itemTitle: bc };
+    let t = firstNonEmpty([extractTitle(item), item.external_id, bc]);
+    if (item.biblio_id) { try { t = extractTitle(await kohaRequest(`/biblios/${item.biblio_id}`)) || t; } catch (_) {} }
+    return { itemBarcode: bc, itemTitle: t };
+  } catch (_) { return { itemBarcode: bc, itemTitle: bc }; }
+}
+
+async function getItemDetailsById(id) {
+  if (!id) return { itemBarcode: '', itemTitle: '' };
+  try {
+    const item = await kohaRequest(`/items/${id}`);
+    let t = firstNonEmpty([extractTitle(item), item.external_id, String(id)]);
+    if (item.biblio_id) { try { t = extractTitle(await kohaRequest(`/biblios/${item.biblio_id}`)) || t; } catch (_) {} }
+    return { itemBarcode: firstNonEmpty([item.external_id, item.barcode, '']), itemTitle: t };
+  } catch (_) { return { itemBarcode: '', itemTitle: '' }; }
+}
+
+async function getPatronAccountSummary(card) {
+  if (card === 'E0040150111266FC') card = '1';
+  let p = null;
+  try { p = findExactMatch(normalizeCollection(await kohaRequest(`/patrons?cardnumber=${encodeURIComponent(card)}`)), 'cardnumber', card); } catch (_) {}
+  if (!p) { try { p = normalizeCollection(await kohaRequest(`/patrons?q=${encodeURIComponent(card)}`)).find(x => String(x.cardnumber || '').toUpperCase() === card.toUpperCase()); } catch (_) {} }
+  if (!p) throw new Error('Patron not found');
+
+  let fine = 0; try { const a = await kohaRequest(`/patrons/${p.patron_id}/account`); fine = Number(a?.outstanding_debits?.total ?? a?.balance ?? 0) || 0; } catch (_) {}
+  const cos = normalizeCollection(await kohaRequest(`/checkouts?q=${encodeURIComponent(JSON.stringify({ patron_id: p.patron_id, checkin_date: null }))}`));
+  const loans = await Promise.all(cos.map(async (c) => {
+    const d = await getItemDetailsById(c.item_id);
+    return { itemBarcode: d.itemBarcode || c.external_id || String(c.item_id), itemTitle: d.itemTitle || c.title || `Item ${c.item_id}`, dueDate: c.due_date || c.date_due || '' };
+  }));
+  return { patronCardNumber: card, patronName: firstNonEmpty([`${p.firstname || ''} ${p.surname || ''}`.trim(), p.cardnumber]), fineAmount: fine, loans };
+}
+
+// --- Route Handlers ---
+async function handleAccount(req, res) {
+  try {
+    const u = new URL(req.url, `http://${req.headers.host}`), c = String(u.searchParams.get('cardnumber') || '').trim();
+    if (!c) return sendJson(res, 400, { success: false, message: 'Card number required' });
+    sendJson(res, 200, { success: true, data: await getPatronAccountSummary(c) });
+  } catch (e) { sendJson(res, 500, { success: false, message: e.message }); }
+}
+
+async function handleCheckout(req, res) {
+  try {
+    const b = await parseRequestBody(req), uid = normalizeRfidUid(b.rfidUid), bc = resolveItemBarcode(normalizeItemBarcode(b.itemBarcode), uid);
+    if (!b.patronCardNumber || !bc) return sendJson(res, 400, { success: false, message: 'Missing fields' });
+    const ps = normalizeCollection(await kohaRequest(`/patrons?cardnumber=${encodeURIComponent(b.patronCardNumber)}`));
+    const p = findExactMatch(ps, 'cardnumber', b.patronCardNumber);
+    if (!p) return sendJson(res, 404, { success: false, message: 'Patron not found' });
+    const is = normalizeCollection(await kohaRequest(`/items?external_id=${encodeURIComponent(bc)}`));
+    const i = findExactMatch(is, 'external_id', bc);
+    if (!i) return sendJson(res, 404, { success: false, message: 'Item not found' });
+    const co = await kohaPost('/checkouts', { patron_id: p.patron_id, item_id: i.item_id, library_id: i.home_library_id || KOHA_CONFIG.libraryId });
+    let su = null; try { su = await writeRfidSecurityState({ barcode: bc, uid, afi: '00', state: 'Unsecure' }); } catch (se) { su = { success: false, message: se.message }; }
+    const dt = await getItemDetails(bc);
+    sendJson(res, 200, { success: true, message: 'Checked out', data: { checkoutId: co.checkout_id, patronName: `${p.firstname} ${p.surname}`.trim(), itemBarcode: bc, itemTitle: dt.itemTitle, dueDate: co.due_date, securityUpdate: su } });
+  } catch (e) { sendJson(res, 500, { success: false, message: e.message }); }
+}
+
+async function handleCheckin(req, res) {
+  try {
+    const b = await parseRequestBody(req), uid = normalizeRfidUid(b.rfidUid), bc = resolveItemBarcode(normalizeItemBarcode(b.itemBarcode), uid);
+    if (!bc) return sendJson(res, 400, { success: false, message: 'Barcode required' });
+    const r = await sipCheckin(bc);
+    if (!r.ok) return sendJson(res, 500, { success: false, message: r.message });
+    let su = null; try { su = await writeRfidSecurityState({ barcode: bc, uid, afi: '90', state: 'Secure' }); } catch (se) { su = { success: false, message: se.message }; }
+    const dt = await getItemDetails(bc);
+    sendJson(res, 200, { success: true, message: 'Checked in', data: { itemBarcode: bc, itemTitle: dt.itemTitle, securityUpdate: su } });
+  } catch (e) { sendJson(res, 500, { success: false, message: e.message }); }
+}
+
+async function handleRenewBatch(req, res) {
+  try {
+    const b = await parseRequestBody(req), card = String(b.patronCardNumber || '').trim(), bcs = Array.isArray(b.barcodes) ? b.barcodes : [];
+    if (!card || bcs.length === 0) return sendJson(res, 400, { success: false, message: 'Invalid request' });
+    const results = [];
+    for (const bc of bcs) {
+      try {
+        const is = normalizeCollection(await kohaRequest(`/items?external_id=${encodeURIComponent(bc)}`));
+        const i = findExactMatch(is, 'external_id', bc);
+        if (!i) { results.push({ barcode: bc, ok: false, message: 'Not found' }); continue; }
+        const q = encodeURIComponent(JSON.stringify({ item_id: i.item_id, checkin_date: null }));
+        const cos = normalizeCollection(await kohaRequest(`/checkouts?q=${q}`));
+        const c = cos[0];
+        if (!c) { results.push({ barcode: bc, ok: false, message: 'Not checked out' }); continue; }
+        const rr = await kohaPost(`/checkouts/${c.checkout_id}/renewal`, {});
+        results.push({ barcode: bc, ok: true, message: 'Renewed', newDueDate: rr.due_date });
+      } catch (e) { results.push({ barcode: bc, ok: false, message: e.message }); }
+    }
+    sendJson(res, 200, { success: true, results });
+  } catch (e) { sendJson(res, 500, { success: false, message: e.message }); }
+}
+
+
+// --- Missing Domain Helpers ---
+async function handleRenew(req, res) {
+  try {
+    const b = await parseRequestBody(req), card = String(b.patronCardNumber || '').trim(), bc = normalizeItemBarcode(b.itemBarcode);
+    if (!card || !bc) return sendJson(res, 400, { success: false, message: 'Missing fields' });
+    const p = await getPatronForRenew(card);
+    if (!p) return sendJson(res, 404, { success: false, message: 'Patron not found' });
+    const is = normalizeCollection(await kohaRequest(`/items?external_id=${encodeURIComponent(bc)}`));
+    const i = findExactMatch(is, 'external_id', bc);
+    if (!i) return sendJson(res, 404, { success: false, message: 'Item not found' });
+    const co = await getActiveCheckoutForItemId(i.item_id);
+    if (!co || Number(co.patron_id) !== Number(p.patron_id)) return sendJson(res, 403, { success: false, message: 'Not issued to this patron' });
+    const rr = await kohaPost(`/checkouts/${co.checkout_id}/renewal`, {});
+    const dt = await getItemDetails(bc);
+    sendJson(res, 200, { success: true, message: 'Renewed', data: { patronName: `${p.firstname} ${p.surname}`.trim(), itemBarcode: bc, itemTitle: dt.itemTitle, newDueDate: rr.due_date } });
+  } catch (e) { sendJson(res, 500, { success: false, message: e.message }); }
+}
+
+async function handleRenewItemsOut(req, res) {
+  try {
+    const u = new URL(req.url, `http://${req.headers.host}`), card = String(u.searchParams.get('cardnumber') || '').trim();
+    if (!card) return sendJson(res, 400, { success: false, message: 'Card required' });
+    const p = await getPatronForRenew(card);
+    if (!p) return sendJson(res, 404, { success: false, message: 'Patron not found' });
+    const cos = normalizeCollection(await kohaRequest(`/checkouts?q=${encodeURIComponent(JSON.stringify({ patron_id: p.patron_id, checkin_date: null }))}`));
+    const items = await Promise.all(cos.filter(c => Number(c?.patron_id) === Number(p.patron_id) && c?.checkin_date == null).map(async (c) => {
+      const d = await getItemDetailsById(c.item_id);
+      let renewable = null, reason = '';
+      try {
+        const check = await kohaRequest(`/checkouts/${c.checkout_id}/renewability`);
+        renewable = check.renewable;
+        if (!renewable) reason = check.error || check.reason || 'Not renewable';
+      } catch (_) {}
+      return { checkoutId: c.checkout_id, itemId: c.item_id, itemBarcode: d.itemBarcode || c.external_id, itemTitle: d.itemTitle || c.title, dueDate: c.due_date, renewable, notRenewableReason: reason };
+    }));
+    sendJson(res, 200, { success: true, data: { patronName: `${p.firstname} ${p.surname}`.trim(), patronCardNumber: card, items } });
+  } catch (e) { sendJson(res, 500, { success: false, message: e.message }); }
+}
+
+async function handlePlaceHold(req, res) {
+  try {
+    const b = await parseRequestBody(req), card = String(b.patronCardNumber || '').trim(), bc = String(b.barcode || '').trim();
+    const ps = normalizeCollection(await kohaRequest(`/patrons?cardnumber=${encodeURIComponent(card)}`));
+    const p = findExactMatch(ps, 'cardnumber', card);
+    const is = normalizeCollection(await kohaRequest(`/items?external_id=${encodeURIComponent(bc)}`));
+    const i = findExactMatch(is, 'external_id', bc) || is[0];
+    if (!p || !i) throw new Error('Patron or Item not found');
+    const r = await kohaPost('/holds', { patron_id: p.patron_id, biblio_id: i.biblio_id, pickup_library_id: KOHA_CONFIG.libraryId });
+    sendJson(res, 200, { success: true, hold: r });
+  } catch (e) { sendJson(res, 500, { success: false, message: e.message }); }
+}
+
+// --- QR Receipt Module (isolated) ---
+const QR_TOKEN_TTL_SEC = 180, QR_TEMP_DIR = path.join(__dirname, 'tmp', 'receipts'), QR_TOKENS = new Map();
+try { fs.mkdirSync(QR_TEMP_DIR, { recursive: true }); } catch (_) {}
+function resolveReceiptBaseUrl(req) { const lan = getLanIp(); return { url: lan ? `http://${lan}:${PORT}` : `http://${req.headers.host || 'localhost:'+PORT}`, localOnly: true }; }
 async function generateReceiptPdf(tx) {
   return new Promise((resolve, reject) => {
-    if (!PDFDocument) {
-      return reject(new Error('PDFDocument library not available'));
-    }
-
-    const doc    = new PDFDocument({ margin: 40, size: 'A4' });
-    const chunks = [];
-
-    doc.on('data',  (c) => chunks.push(c));
-    doc.on('end',   () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
-
-    const now      = new Date(tx.timestamp || Date.now());
-    const dateStr  = now.toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
-    const timeStr  = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-
-    // Header
-    doc.fontSize(18).font('Helvetica-Bold').text('Punjabi University Library', { align: 'center' });
-    doc.fontSize(11).font('Helvetica').text('Renewal Receipt', { align: 'center' });
-    doc.moveDown(0.5);
-    doc.moveTo(40, doc.y).lineTo(555, doc.y).stroke();
-    doc.moveDown(0.6);
-
-    // Meta
-    doc.fontSize(10).font('Helvetica-Bold').text('Date: ', { continued: true })
-       .font('Helvetica').text(dateStr);
-    doc.font('Helvetica-Bold').text('Time: ', { continued: true })
-       .font('Helvetica').text(timeStr);
-    if (tx.patronName) {
-      doc.font('Helvetica-Bold').text('Patron: ', { continued: true })
-         .font('Helvetica').text(String(tx.patronName));
-    }
-    doc.moveDown(0.6);
-
-    // Summary line
-    const items        = Array.isArray(tx.items) ? tx.items : [];
-    const renewedCount = items.filter((i) => i.status === 'renewed').length;
-    doc.fontSize(10).font('Helvetica-Bold')
-       .text(`Items renewed: ${renewedCount} of ${items.length}`);
-    doc.moveDown(0.4);
-
-    // Table header
-    const colX = { title: 40, status: 330, due: 435 };
-    doc.fontSize(9).font('Helvetica-Bold').fillColor('#333');
-    doc.text('Item Title',  colX.title,  doc.y, { width: 280 });
-    const rowY = doc.y - doc.currentLineHeight();
-    doc.text('Status',     colX.status, rowY,  { width: 95  });
-    doc.text('New Due',    colX.due,    rowY,  { width: 110 });
-    doc.moveDown(0.2);
-    doc.moveTo(40, doc.y).lineTo(555, doc.y).stroke('#aaa');
-    doc.moveDown(0.3);
-
-    // Table rows
-    items.forEach((item) => {
-      const isOk      = item.status === 'renewed';
-      const statusTxt = isOk ? '✓ Renewed' : '✗ Not renewed';
-      const dueTxt    = item.newDueDate
-        ? new Date(item.newDueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-        : (isOk ? 'See librarian' : '—');
-      const title     = String(item.title || item.barcode || 'Unknown item').slice(0, 60);
-
-      const rowStart = doc.y;
-      doc.fontSize(9).font('Helvetica').fillColor('#111').text(title, colX.title, rowStart, { width: 280 });
-      const afterTitle = doc.y;
-
-      doc.fontSize(9).font('Helvetica-Bold')
-         .fillColor(isOk ? '#065f46' : '#991b1b')
-         .text(statusTxt, colX.status, rowStart, { width: 95 });
-      doc.fillColor('#111').font('Helvetica')
-         .text(dueTxt, colX.due, rowStart, { width: 110 });
-
-      doc.y = Math.max(afterTitle, doc.y);
-      doc.moveDown(0.2);
-      doc.moveTo(40, doc.y).lineTo(555, doc.y).stroke('#e8e8e8');
-      doc.moveDown(0.2);
-    });
-
-    doc.moveDown(1);
-    doc.moveTo(40, doc.y).lineTo(555, doc.y).stroke('#ccc');
-    doc.moveDown(0.5);
-
-    // Footer
-    doc.fontSize(8).font('Helvetica').fillColor('#777')
-       .text('Thank you for using Punjabi University Library.', { align: 'center' })
-       .text('Please return items on or before the due date shown.', { align: 'center' })
-       .text('Powered by SoCTeamup Semiconductors', { align: 'center' });
-
+    if (!PDFDocument) return reject(new Error('pdfkit missing'));
+    const doc = new PDFDocument({ margin: 40, size: 'A4' }), chunks = [];
+    doc.on('data', c => chunks.push(c)); doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.fontSize(18).text('Punjabi University Library', { align: 'center' });
+    doc.fontSize(12).text('Renewal Receipt', { align: 'center' });
+    doc.moveDown(); doc.fontSize(10).text(`Date: ${new Date().toLocaleString()}`);
+    if (tx.patronName) doc.text(`Patron: ${tx.patronName}`);
+    doc.moveDown(); const items = Array.isArray(tx.items) ? tx.items : [];
+    items.forEach(it => doc.text(`${it.status === 'renewed' ? '✓' : '✗'} ${it.title || it.barcode} - ${it.newDueDate || 'N/A'}`));
     doc.end();
   });
 }
-
-/**
- * POST /api/receipt/qr
- * Body: { transactionData: { ... } }
- * Returns: { token, url, expiresAt, localOnly }
- *
- * ISOLATED — only called from Renew receipt screen.
- */
 async function handleQrReceiptCreate(req, res) {
   try {
-    const body = await parseRequestBody(req);
-    const tx   = body.transactionData;
-
-    if (!tx || typeof tx !== 'object') {
-      sendJson(res, 400, { success: false, message: 'transactionData is required' });
-      return;
-    }
-
-    if (!PDFDocument) {
-      sendJson(res, 503, { success: false, message: 'PDF generation is not available (pdfkit not installed)' });
-      return;
-    }
-
-    const token     = generateQrToken();
-    const expiresAt = new Date(Date.now() + QR_TOKEN_TTL_SEC * 1000);
-    const pdfPath   = path.join(QR_TEMP_DIR, `receipt_${token}.pdf`);
-
-    // Generate PDF
-    const pdfBuf = await generateReceiptPdf(tx);
-    fs.writeFileSync(pdfPath, pdfBuf);
-
-    // Store token
-    QR_TOKENS.set(token, {
-      txData    : tx,
-      pdfPath,
-      downloaded: false,
-      expiresAt
-    });
-
-    const { url: baseUrl, localOnly } = resolveReceiptBaseUrl(req);
-    const pdfUrl = `${baseUrl}/receipt/pdf/${token}`;
-
-    logger.info('QR-Receipt', `Token created: ${token.slice(0, 8)}… expires ${expiresAt.toISOString()}`);
-
-    sendJson(res, 200, {
-      token,
-      url      : pdfUrl,
-      expiresAt: expiresAt.toISOString(),
-      localOnly
-    });
-  } catch (error) {
-    logger.error('QR-Receipt', `Create failed: ${error.message}`);
-    sendJson(res, 500, { success: false, message: error.message || 'Failed to generate QR receipt' });
-  }
+    const b = await parseRequestBody(req), tx = b.transactionData, token = crypto.randomBytes(24).toString('hex');
+    const pdfPath = path.join(QR_TEMP_DIR, `receipt_${token}.pdf`);
+    fs.writeFileSync(pdfPath, await generateReceiptPdf(tx));
+    QR_TOKENS.set(token, { pdfPath, expiresAt: Date.now() + QR_TOKEN_TTL_SEC*1000, downloaded: false });
+    const { url } = resolveReceiptBaseUrl(req);
+    sendJson(res, 200, { token, url: `${url}/receipt/pdf/${token}`, expiresAt: new Date(Date.now() + QR_TOKEN_TTL_SEC*1000).toISOString() });
+  } catch (e) { sendJson(res, 500, { success: false, message: e.message }); }
+}
+function handleQrReceiptPdf(res, token) {
+  const e = QR_TOKENS.get(token);
+  if (!e || Date.now() > e.expiresAt) return sendJson(res, 404, { message: 'Expired' });
+  e.downloaded = true; res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="receipt.pdf"' });
+  res.end(fs.readFileSync(e.pdfPath));
 }
 
-/**
- * GET /receipt/pdf/:token
- * Serves the PDF if token is valid and not expired.
- * Marks downloaded=true on first successful download.
- *
- * ISOLATED — not reachable from Check-In / Check-Out / Account flows.
- */
-function handleQrReceiptPdf(req, res, token) {
-  const entry = QR_TOKENS.get(token);
-
-  if (!entry) {
-    res.writeHead(404, { 'Content-Type': 'text/plain' });
-    res.end('Receipt not found or already expired.');
-    return;
-  }
-
-  if (Date.now() > entry.expiresAt.getTime()) {
-    QR_TOKENS.delete(token);
-    try { fs.unlinkSync(entry.pdfPath); } catch (_) {}
-    res.writeHead(410, { 'Content-Type': 'text/plain' });
-    res.end('Receipt link has expired.');
-    return;
-  }
-
-  let pdfBuf;
-  try {
-    pdfBuf = fs.readFileSync(entry.pdfPath);
-  } catch (_) {
-    res.writeHead(500, { 'Content-Type': 'text/plain' });
-    res.end('Receipt file unavailable.');
-    return;
-  }
-
-  // Mark as downloaded on first access
-  if (!entry.downloaded) {
-    entry.downloaded = true;
-    logger.info('QR-Receipt', `PDF downloaded for token ${token.slice(0, 8)}…`);
-  }
-
-  res.writeHead(200, {
-    'Content-Type'        : 'application/pdf',
-    'Content-Length'      : pdfBuf.length,
-    'Content-Disposition' : 'attachment; filename="renewal-receipt.pdf"',
-    'Cache-Control'       : 'no-store',
-    'Access-Control-Allow-Origin': '*'
-  });
-  res.end(pdfBuf);
-}
-
-/**
- * GET /api/receipt/qr-status/:token
- * Returns: { downloaded, remainingSeconds, expired }
- *
- * ISOLATED — polled only by qr-receipt.js in the Renew receipt screen.
- */
-function handleQrReceiptStatus(req, res, token) {
-  const entry = QR_TOKENS.get(token);
-
-  if (!entry) {
-    sendJson(res, 200, { downloaded: false, remainingSeconds: 0, expired: true });
-    return;
-  }
-
-  const remaining = Math.max(0, Math.floor((entry.expiresAt.getTime() - Date.now()) / 1000));
-  const expired   = remaining === 0;
-
-  if (expired) {
-    QR_TOKENS.delete(token);
-    try { fs.unlinkSync(entry.pdfPath); } catch (_) {}
-  }
-
-  sendJson(res, 200, {
-    downloaded     : entry.downloaded,
-    remainingSeconds: remaining,
-    expired
-  });
-}
-
-/** Cleanup expired tokens + their PDFs every 60 s */
-setInterval(() => {
-  const now = Date.now();
-  for (const [token, entry] of QR_TOKENS.entries()) {
-    if (now > entry.expiresAt.getTime()) {
-      QR_TOKENS.delete(token);
-      try { fs.unlinkSync(entry.pdfPath); } catch (_) {}
-      logger.info('QR-Receipt', `Cleaned up expired token ${token.slice(0, 8)}…`);
-    }
-  }
-}, 60 * 1000);
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  End QR Receipt Module
-// ═══════════════════════════════════════════════════════════════════════════════
-
-async function handleRfidStatus(res) {
-  try {
-    if (!RFID_STATE.enabled) {
-      sendJson(res, 200, {
-        enabled: false,
-        bridge: 'disabled',
-        message: 'RFID integration is disabled'
-      });
-      return;
-    }
-
-    await ensureRfidBridgeStarted();
-    const bridgeStatus = await proxyRfidRequest('/api/status');
-    sendJson(res, 200, {
-      enabled: true,
-      bridge: RFID_STATE.status,
-      bridgePort: RFID_PORT,
-      ...bridgeStatus
-    });
-  } catch (error) {
-    sendJson(res, 503, {
-      enabled: RFID_STATE.enabled,
-      bridge: RFID_STATE.status,
-      bridgePort: RFID_PORT,
-      lastError: RFID_STATE.lastError || error.message,
-      compileLog: RFID_STATE.compileLog
-    });
-  }
-}
-
-async function handleRfidTags(res) {
-  try {
-    if (!RFID_STATE.enabled) {
-      sendJson(res, 200, []);
-      return;
-    }
-
-    await ensureRfidBridgeStarted();
-    const tags = filterLiveRfidTags(await proxyRfidRequest('/api/tags')).map(normalizeRfidTag);
-    
-    if (tags.length > 0) {
-      logger.info('RFID', `Detected ${tags.length} tag(s) on reader`, { tags });
-    }
-    
-    sendJson(res, 200, tags);
-  } catch (error) {
-    logger.error('RFID', `Tag polling failed: ${error.message}`);
-    sendJson(res, 503, {
-      success: false,
-      message: RFID_STATE.lastError || error.message
-    });
-  }
-}
-
-async function handleRfidSecurity(req, res) {
-  try {
-    const body = await parseRequestBody(req);
-    const state = String(body.state || '').trim().toLowerCase();
-    const barcode = String(body.barcode || '').trim();
-    const uid = String(body.uid || '').trim();
-
-    const afiMap = {
-      secure: '90',
-      unsecure: '00'
-    };
-
-    const afi = body.afi ? String(body.afi).trim().toUpperCase() : afiMap[state];
-    logBackend('rfid.security.request', { state, barcode, uid, afi });
-
-    if (!afi) {
-      sendJson(res, 400, {
-        success: false,
-        message: 'state must be Secure or Unsecure, or provide afi directly'
-      });
-      return;
-    }
-
-    const result = await writeRfidSecurityState({
-      barcode,
-      uid,
-      afi,
-      state: state || (afi === '90' ? 'secure' : afi === '00' ? 'unsecure' : '')
-    });
-
-    sendJson(res, 200, result);
-  } catch (error) {
-    const message = error.message || 'RFID security update failed';
-    const statusCode = /responded with status 503|bridge unavailable|reader/i.test(message) ? 503 : 500;
-    logBackend('rfid.security.error', { message, statusCode });
-
-    sendJson(res, statusCode, {
-      success: false,
-      message
-    });
-  }
-}
-
+// --- Main Router ---
 const server = http.createServer(async (req, res) => {
-  const reqUrl = new URL(req.url, `http://${req.headers.host}`);
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
+  const u = new URL(req.url, `http://${req.headers.host}`);
+  if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': '*' }); return res.end(); }
+  
+  if (u.pathname === '/api/status') return sendJson(res, 200, { status: 'ok', online: await isKohaReachable(), internet: await isInternetReachable(), rfid: { enabled: RFID_STATE.enabled, state: RFID_STATE.status, connected: RFID_STATE.hardwareConnected && RFID_STATE.status === 'running' } });
+  if (u.pathname === '/api/account') return handleAccount(req, res);
+  if (u.pathname === '/api/checkout') return handleCheckout(req, res);
+  if (u.pathname === '/api/checkin') return handleCheckin(req, res);
+  if (u.pathname === '/api/renew') return handleRenew(req, res);
+  if (u.pathname === '/api/renew/items') return handleRenewItemsOut(req, res);
+  if (u.pathname === '/api/renew/batch') return handleRenewBatch(req, res);
+  if (u.pathname === '/api/hold') return handlePlaceHold(req, res);
+  if (u.pathname === '/api/receipt/qr') return handleQrReceiptCreate(req, res);
+  if (u.pathname.startsWith('/receipt/pdf/')) return handleQrReceiptPdf(res, u.pathname.slice(13));
+  if (u.pathname === '/api/rfid/debug') {
+    return sendJson(res, 200, {
+      enabled: RFID_STATE.enabled,
+      status: RFID_STATE.status,
+      disconnectionCount: RFID_STATE.disconnectionCount,
+      startup: RFID_STATE.startup,
+      hasChild: !!RFID_STATE.child,
+      port: RFID_PORT
     });
-    res.end();
-    return;
   }
-
-  if (req.method === 'GET' && reqUrl.pathname === '/api/status') {
-    const isOnline = await isKohaReachable();
-    let rfidConnected = false;
-    
-    if (RFID_STATE.status === 'running') {
-      try {
-        const bridgeStatus = await proxyRfidRequest('/api/status');
-        rfidConnected = (bridgeStatus.status === 'CONNECTED' || bridgeStatus.connected === true);
-        
-        if (bridgeStatus.lastError && /Device not open|failed|Disconnected/i.test(bridgeStatus.lastError)) {
-          rfidConnected = false;
-        }
-        
-        if (rfidConnected) {
-          try {
-            await proxyRfidRequest('/api/tags');
-          } catch (_) {
-            rfidConnected = false;
-          }
-        }
-      } catch (_) {}
+  if (u.pathname === '/api/rfid/status') {
+    await ensureRfidBridgeStarted();
+    const bs = await proxyRfidRequest('/api/status').catch(() => ({}));
+    return sendJson(res, 200, { enabled: RFID_STATE.enabled, state: RFID_STATE.status, bridgePort: RFID_PORT, ...bs });
+  }
+  if (u.pathname === '/api/rfid/restart') return sendJson(res, 200, { success: true, ...(await restartRfidBridge()) });
+  if (u.pathname === '/api/rfid/tags' || u.pathname === '/api/tags' || u.pathname === '/api/rfid/poll') {
+    try { 
+      await ensureRfidBridgeStarted(); 
+      const ts = filterLiveRfidTags(await proxyRfidRequest('/api/tags')).map(normalizeRfidTag); 
+      sendJson(res, 200, { success: true, tags: ts }); 
     }
-
-    sendJson(res, 200, {
-      status: 'ok',
-      service: 'finalpUI-checkin',
-      port: PORT,
-      online: isOnline,
-      rfid: {
-        enabled: RFID_STATE.enabled,
-        state: RFID_STATE.status,
-        connected: rfidConnected,
-        bridgePort: RFID_PORT,
-        lastError: RFID_STATE.lastError
-      }
-    });
+    catch (e) { sendJson(res, 503, { success: false, message: e.message }); }
     return;
   }
-
-
-  if (req.method === 'GET' && reqUrl.pathname === '/api/rfid/status') {
-    await handleRfidStatus(res);
-    return;
+  if (u.pathname === '/api/rfid/arm') {
+    try {
+      const afi = u.searchParams.get('afi') || '00';
+      const resBridge = await proxyRfidRequest(`/api/arm?afi=${encodeURIComponent(afi)}`);
+      return sendJson(res, 200, { success: true, ...resBridge });
+    } catch (e) { return sendJson(res, 500, { success: false, message: e.message }); }
   }
-
-  if (req.method === 'GET' && reqUrl.pathname === '/api/search') {
-    await handleSearch(req, res);
-    return;
+  if (u.pathname === '/api/rfid/disarm') {
+    try {
+      const resBridge = await proxyRfidRequest('/api/disarm');
+      return sendJson(res, 200, { success: true, ...resBridge });
+    } catch (e) { return sendJson(res, 500, { success: false, message: e.message }); }
   }
-
-  if (req.method === 'GET' && reqUrl.pathname === '/api/account') {
-    await handleAccount(req, res);
-    return;
-  }
-
-  if (req.method === 'GET' && reqUrl.pathname === '/api/debug/logs') {
-    sendJson(res, 200, {
-      success: true,
-      logFile: APP_LOG_FILE,
-      lines: readRecentBackendLogLines(Number(reqUrl.searchParams.get('lines') || 200))
-    });
-    return;
-  }
-
-  if (req.method === 'GET' && (reqUrl.pathname === '/api/rfid/tags' || reqUrl.pathname === '/api/tags')) {
-    await handleRfidTags(res);
-    return;
-  }
-
-  if (req.method === 'POST' && reqUrl.pathname === '/api/rfid/security') {
-    await handleRfidSecurity(req, res);
-    return;
-  }
-
-  if (req.method === 'GET' && reqUrl.pathname === '/api/rfid/arm') {
-    await handleRfidArm(req, res);
-    return;
-  }
-
-  if (req.method === 'GET' && reqUrl.pathname === '/api/rfid/disarm') {
-    await handleRfidDisarm(req, res);
-    return;
-  }
-
-  if (req.method === 'POST' && reqUrl.pathname === '/api/checkout') {
-    await handleCheckout(req, res);
-    return;
-  }
-
-  if (req.method === 'POST' && reqUrl.pathname === '/api/checkin') {
-    await handleCheckin(req, res);
-    return;
-  }
-
-  if (req.method === 'GET' && reqUrl.pathname === '/api/renew/items') {
-    await handleRenewItemsOut(req, res);
-    return;
-  }
-
-  if (req.method === 'POST' && reqUrl.pathname === '/api/renew/batch') {
-    await handleRenewBatch(req, res);
-    return;
-  }
-
-  if (req.method === 'POST' && reqUrl.pathname === '/api/renew') {
-    await handleRenew(req, res);
-    return;
-  }
-
-  // ── QR Receipt routes (Renew-only, isolated) ────────────────────────────────
-  if (req.method === 'POST' && reqUrl.pathname === '/api/receipt/qr') {
-    await handleQrReceiptCreate(req, res);
-    return;
-  }
-
-  if (req.method === 'GET' && reqUrl.pathname.startsWith('/receipt/pdf/')) {
-    const token = reqUrl.pathname.slice('/receipt/pdf/'.length);
-    handleQrReceiptPdf(req, res, token);
-    return;
-  }
-
-  if (req.method === 'GET' && reqUrl.pathname.startsWith('/api/receipt/qr-status/')) {
-    const token = reqUrl.pathname.slice('/api/receipt/qr-status/'.length);
-    handleQrReceiptStatus(req, res, token);
-    return;
-  }
-  // ── End QR Receipt routes ────────────────────────────────────────────────────
-  if (req.method === 'POST' && reqUrl.pathname === '/api/hold') {
-    await handlePlaceHold(req, res);
+  if (u.pathname === '/api/rfid/security' && req.method === 'POST') {
+    try {
+      const b = await parseRequestBody(req), m = { secure: '90', unsecure: '00' };
+      const afi = b.afi || m[b.state?.toLowerCase()];
+      sendJson(res, 200, await writeRfidSecurityState({ barcode: b.barcode, uid: b.uid, afi, state: b.state }));
+    } catch (e) { sendJson(res, 500, { success: false, message: e.message }); }
     return;
   }
 
   if (req.method === 'GET') {
-    const filePath = path.join(PUBLIC_DIR, reqUrl.pathname === '/' ? 'index.html' : reqUrl.pathname);
-    const normalized = path.normalize(filePath);
-
-    if (!normalized.startsWith(PUBLIC_DIR)) {
-      sendJson(res, 403, { success: false, message: 'Forbidden' });
-      return;
-    }
-
-    fs.stat(normalized, (err, stats) => {
-      if (!err && stats.isDirectory()) {
-        serveFile(res, path.join(normalized, 'index.html'));
-        return;
-      }
-
-      serveFile(res, normalized);
-    });
-    return;
+    const fp = path.normalize(path.join(PUBLIC_DIR, u.pathname === '/' ? 'index.html' : u.pathname));
+    if (fp.startsWith(PUBLIC_DIR)) return serveFile(res, fp);
   }
-
   sendJson(res, 404, { success: false, message: 'Not found' });
 });
 
 warmRfidBarcodeCacheFromLogs();
 startRfidMonitor();
+ensureRfidBridgeStarted().catch((e) => logger.warn('RFID', `Startup skipped: ${e.message}`));
 
-ensureRfidBridgeStarted().catch((error) => {
-  logger.warn('RFID', `Startup skipped: ${error.message}`);
-});
+const cleanup = () => { stopRfidMonitor(); stopRfidBridge(); };
+process.on('exit', cleanup);
+process.on('SIGINT', () => { cleanup(); process.exit(0); });
+process.on('SIGTERM', () => { cleanup(); process.exit(0); });
 
-process.on('exit', () => {
-  stopRfidMonitor();
-  stopRfidBridge();
-});
-process.on('SIGINT', () => {
-  stopRfidMonitor();
-  stopRfidBridge();
-  process.exit(0);
-});
-process.on('SIGTERM', () => {
-  stopRfidMonitor();
-  stopRfidBridge();
-  process.exit(0);
-});
-
-server.listen(PORT, () => {
-  logger.info('System', `finalpUI running at http://localhost:${PORT}`);
-  logger.info('System', 'Open the page, press Check-In, enter the book number, or use RFID when the reader is connected.');
-});
+server.listen(PORT, () => logger.info('System', `Running at http://localhost:${PORT}`));

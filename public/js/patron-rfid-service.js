@@ -89,6 +89,17 @@ class PatronRfidService {
         await this.requestAndConnect();
     }
 
+    async pauseScanning(message = 'Patron RFID reader idle.') {
+        this.resetSession();
+        if (this.port) {
+            try {
+                await this.send('IDLE\n');
+            } catch (_) {
+            }
+        }
+        this.setStatus(message, 'ok');
+    }
+
     async tryAutoConnect() {
         if (this.port || this.isConnecting || !('serial' in navigator)) return;
 
@@ -424,80 +435,56 @@ class PatronRfidService {
     }
 
     applyPatronCard(tagValue, uid) {
-        if (!window.kioskApp) {
-            return;
-        }
+        if (!window.kioskApp) return;
 
-        const isCheckout = window.kioskApp.currentOperation === 'checkout';
-        const isAccount = window.kioskApp.currentOperation === 'account';
-        if (!isCheckout && !isAccount) return;
-
-        const targetInputId = isCheckout ? 'patron-card' : 'account-card';
-        const patronCardEl = document.getElementById(targetInputId);
-        const isAccount  = window.kioskApp.currentOperation === 'account';
-        const isRenew    = window.kioskApp.currentOperation === 'renew';
+        const op = window.kioskApp.currentOperation;
+        const isCheckout = op === 'checkout';
+        const isAccount = op === 'account';
+        const isRenew = op === 'renew';
 
         if (!isCheckout && !isAccount && !isRenew) return;
-        const isAccount = window.kioskApp.currentOperation === 'account';
-        if (!isCheckout && !isAccount) return;
+
+        // Reset the inactivity timer on the main app
+        if (window.kioskApp?.resetAutoLogout) window.kioskApp.resetAutoLogout();
 
         const safeValue = String(tagValue || '').trim();
         if (!safeValue) return;
 
-        // Renew: delegate to kioskApp.handleRenewPatronScan
+        // Handle Renew flow
         if (isRenew) {
-            // Only accept scan while the patron scan screen is shown; ignore after navigation
-            if (window.kioskApp.currentView !== 'renew-scan') {
-                return;
-            }
+            if (window.kioskApp.currentView !== 'renew-scan') return;
             window.kioskApp.handleRenewPatronScan(safeValue);
             this.setStatus(`Patron card scanned successfully.`, 'ok');
-            console.log('[Patron RFID] Renew patron card captured:', safeValue);
             return;
         }
 
-        const targetInputId = isCheckout ? 'patron-card' : 'account-card';
-        const patronCardEl = document.getElementById(targetInputId);
-        // For "My Account" mode, bypass the hidden input entirely and trigger
-        // the account lookup directly via the HID handler in app.js.
+        // Handle Account flow (direct lookup)
         if (isAccount) {
-            console.log('[Patron RFID] Triggering account lookup for:', safeValue);
-            this.setStatus(`Patron card captured from CH340${uid ? ` (${uid})` : ''}. Loading account…`, 'ok');
-            if (window.kioskApp._handleHidCardRead) {
-                window.kioskApp._handleHidCardRead(safeValue);
+            const loginScreen = document.getElementById('account-login-screen');
+            if (!loginScreen || loginScreen.style.display === 'none') {
+                return;
             }
+            this.setStatus(`Patron card captured${uid ? ` (${uid})` : ''}. Loading account…`, 'ok');
+            window.kioskApp._handleHidCardRead?.(safeValue);
             return;
         }
 
-        // Checkout mode — fill the patron-card input field
+        // Handle Checkout flow (fill input)
         const patronCardEl = document.getElementById('patron-card');
         if (!patronCardEl) return;
 
         if (patronCardEl.value.trim().length > 0) {
-            this.setStatus(
-                isCheckout
-                    ? 'Patron card already filled. Waiting for item barcode from HF FEIG reader.'
-                    : 'Patron card already filled. Press Search to view account.',
-                'Patron card already filled. Waiting for item barcode from HF FEIG reader.',
-                'ok'
-            );
+            this.setStatus('Patron card already filled.', 'ok');
             return;
         }
-
-        const safeValue = String(tagValue || '').trim();
-        if (!safeValue) return;
 
         patronCardEl.value = safeValue;
         patronCardEl.dispatchEvent(new Event('input', { bubbles: true }));
         patronCardEl.dispatchEvent(new Event('change', { bubbles: true }));
-
-        if (isCheckout) {
-            document.getElementById('item-barcode')?.focus();
-        }
         document.getElementById('item-barcode')?.focus();
 
-        this.setStatus(`Patron card captured from CH340${uid ? ` (${uid})` : ''}.`, 'ok');
-        console.log('[Patron RFID] Filled patron card:', safeValue);
+        this.setStatus(`Patron card captured${uid ? ` (${uid})` : ''}.`, 'ok');
+        console.log('[Patron RFID] Applied patron card:', safeValue);
     }
 
     resetSession() {
@@ -546,6 +533,7 @@ class PatronRfidService {
 
     setStatus(message, type = 'info') {
         const elements = [
+            this.statusEl,
             document.getElementById('patron-rfid-status'),
             document.getElementById('renew-patron-status')
         ].filter(Boolean);
@@ -568,28 +556,6 @@ class PatronRfidService {
                 el.style.color = '#0f4c6e';
             }
         }
-        if (!this.statusEl) return;
-
-        this.statusEl.style.display = 'block';
-        this.statusEl.textContent = message;
-
-        if (type === 'ok') {
-            this.statusEl.style.background = 'rgba(16,185,129,0.10)';
-            this.statusEl.style.borderColor = 'rgba(16,185,129,0.24)';
-            this.statusEl.style.color = '#0f6b42';
-            return;
-        }
-
-        if (type === 'error') {
-            this.statusEl.style.background = 'rgba(239,68,68,0.10)';
-            this.statusEl.style.borderColor = 'rgba(239,68,68,0.22)';
-            this.statusEl.style.color = '#9f1d1d';
-            return;
-        }
-
-        this.statusEl.style.background = 'rgba(14,165,233,0.08)';
-        this.statusEl.style.borderColor = 'rgba(14,165,233,0.18)';
-        this.statusEl.style.color = '#0f4c6e';
     }
 }
 

@@ -6,11 +6,11 @@ const CONFIG = {
 
     // Koha API Configuration (for 'koha' mode)
     koha: {
-        baseUrl: 'http://164.52.208.94:82/api/v1',
+        baseUrl: 'http://103.86.177.6/api/v1',
         auth: {
             type: 'basic', // 'basic' or 'oauth2'
-            username: 'jivesna',
-            password: 'library@koha123',
+            username: 'rfid',
+            password: 'Rfid@#123',
             // For OAuth2:
             clientId: '',
             clientSecret: ''
@@ -19,7 +19,7 @@ const CONFIG = {
     },
 
     // OPAC URL for catalog search
-    opacUrl: 'http://164.52.208.94:800',
+    opacUrl: 'http://103.86.177.6:91',
 
     // UI Configuration
     ui: {

@@ -18,57 +18,57 @@ body {
     -webkit-backdrop-filter: blur(12px);
     border-bottom: 1px solid rgba(255, 255, 255, 0.3);
     box-shadow: 0 4px 30px rgba(0, 0, 0, 0.03);
-    padding: 1rem 2rem;
-    margin-bottom: 3rem;
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    padding: 0.9rem 1.25rem;
+    margin-bottom: 1.25rem;
 }
 
+.header-info,
 .mode-indicator {
-    background: rgba(15, 23, 42, 0.05);
-    border: 1px solid rgba(15, 23, 42, 0.1);
-    color: var(--text-dark);
-    font-weight: 700;
+    display: none !important;
+}
+
+.logo {
+    height: 48px;
 }
 
 /* 3D Button Grid */
 .button-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 2.5rem;
-    padding: 2rem;
-    max-width: 1200px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.85rem;
+    padding: 0;
+    width: min(560px, 100%);
+    max-width: 560px;
     margin: 0 auto;
-    perspective: 1000px;
-    /* Enable 3D space */
 }
 
 /* 3D Card Button */
 .feature-button {
     position: relative;
     background: white;
-    border-radius: 24px;
-    padding: 3rem 2rem;
+    border-radius: 18px;
+    aspect-ratio: 1 / 1;
+    min-height: 0;
+    padding: 1rem 0.9rem;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
     cursor: pointer;
-    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    border: 1px solid rgba(255, 255, 255, 0.8);
-    box-shadow:
-        0 10px 20px -5px rgba(15, 23, 42, 0.1),
-        0 8px 8px -6px rgba(14, 165, 233, 0.1);
-    /* Cyan hint */
-    transform-style: preserve-3d;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    border: 1px solid rgba(207, 219, 233, 0.9);
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
     overflow: hidden;
 }
 
 /* Card Hover 3D Lift */
 .feature-button:hover {
-    transform: translateY(-15px) rotateX(5deg);
-    box-shadow:
-        0 25px 30px -5px rgba(15, 23, 42, 0.15),
-        0 15px 15px -6px rgba(14, 165, 233, 0.2);
+    transform: translateY(-4px);
+    box-shadow: 0 16px 32px rgba(15, 23, 42, 0.12);
     border-color: var(--primary);
 }
 
@@ -92,31 +92,30 @@ body {
 
 /* Large 3D Icons */
 .feature-icon {
-    font-size: 5rem;
-    margin-bottom: 1.5rem;
+    font-size: 3.5rem;
+    margin-bottom: 0.9rem;
     z-index: 1;
-    transition: transform 0.4s ease;
+    transition: transform 0.2s ease;
     filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
 }
 
 .feature-button:hover .feature-icon {
-    transform: scale(1.2) translateZ(20px);
-    /* Pop out */
+    transform: scale(1.06);
 }
 
 /* Typography */
 .feature-label {
-    font-size: 1.75rem;
+    font-size: 1.15rem;
     font-weight: 800;
     color: var(--text-dark);
     z-index: 1;
-    letter-spacing: -0.5px;
+    letter-spacing: 0;
 }
 
 .feature-desc {
-    font-size: 1rem;
+    font-size: 0.92rem;
     color: var(--text-light);
-    margin-top: 0.5rem;
+    margin-top: 0.3rem;
     z-index: 1;
     font-weight: 500;
 }
@@ -141,15 +140,15 @@ body {
 /* Welcome Message */
 .welcome-container {
     text-align: center;
-    margin-bottom: 3rem;
+    margin-bottom: 1.25rem;
     animation: fadeInDown 0.8s ease-out;
 }
 
 .welcome-title {
-    font-size: 3.5rem;
+    font-size: clamp(2.2rem, 4.5vw, 3.8rem);
     font-weight: 900;
     color: var(--text-dark);
-    letter-spacing: -2px;
+    letter-spacing: -1px;
     line-height: 1.1;
 }
 
@@ -160,10 +159,175 @@ body {
 }
 
 .welcome-subtitle {
-    font-size: 1.25rem;
+    font-size: 1rem;
     color: var(--text-medium);
-    margin-top: 1rem;
+    margin-top: 0.5rem;
     font-weight: 500;
+}
+
+@media (max-height: 820px) {
+    .welcome-container {
+        margin-bottom: 0.75rem;
+    }
+
+    .welcome-title {
+        font-size: 2.5rem;
+    }
+
+    .welcome-subtitle {
+        font-size: 0.96rem;
+        margin-top: 0.35rem;
+    }
+
+    .button-grid {
+        width: min(500px, 100%);
+        max-width: 500px;
+        gap: 0.7rem;
+    }
+
+    .feature-button {
+        aspect-ratio: 1 / 1;
+        min-height: 0;
+        padding: 1.1rem 0.9rem;
+    }
+
+    .feature-icon {
+        font-size: 2.8rem;
+        margin-bottom: 0.65rem;
+    }
+
+    .feature-label {
+        font-size: 1.08rem;
+    }
+
+    .feature-desc {
+        font-size: 0.88rem;
+    }
+}
+
+@media (max-height: 640px) {
+    .logo {
+        height: 40px;
+    }
+
+    .welcome-title {
+        font-size: 1.95rem;
+    }
+
+    .welcome-subtitle {
+        font-size: 0.92rem;
+        margin-top: 0.35rem;
+    }
+
+    .button-grid {
+        gap: 0.85rem;
+        width: min(100%, 560px);
+        max-width: 560px;
+    }
+
+    .feature-button {
+        aspect-ratio: auto;
+        min-height: 128px;
+        padding: 0.9rem 0.85rem;
+        border-radius: 14px;
+    }
+
+    .feature-icon {
+        font-size: 2.25rem;
+        margin-bottom: 0.45rem;
+    }
+
+    .feature-label {
+        font-size: 1rem;
+    }
+
+    .feature-desc {
+        font-size: 0.82rem;
+    }
+}
+
+@media (max-height: 730px) {
+    .welcome-container {
+        margin-bottom: 0.6rem;
+    }
+
+    .welcome-title {
+        font-size: 2.2rem;
+    }
+
+    .welcome-subtitle {
+        font-size: 0.9rem;
+        margin-top: 0.25rem;
+    }
+
+    .button-grid {
+        width: min(480px, 100%);
+        max-width: 480px;
+        gap: 0.6rem;
+    }
+
+    .feature-button {
+        padding: 0.95rem 0.8rem;
+    }
+
+    .feature-icon {
+        font-size: 2.6rem;
+        margin-bottom: 0.55rem;
+    }
+
+    .feature-label {
+        font-size: 1.02rem;
+    }
+
+    .feature-desc {
+        font-size: 0.84rem;
+        margin-top: 0.2rem;
+    }
+}
+
+body.home-view-active.compact-home-layout .welcome-container {
+    margin-bottom: 0.6rem;
+}
+
+body.home-view-active.compact-home-layout .welcome-title {
+    font-size: 2.2rem;
+}
+
+body.home-view-active.compact-home-layout .welcome-subtitle {
+    font-size: 0.9rem;
+    margin-top: 0.25rem;
+}
+
+body.home-view-active.compact-home-layout .button-grid {
+    width: min(480px, 100%);
+    max-width: 480px;
+    gap: 0.6rem;
+}
+
+body.home-view-active.compact-home-layout .feature-button {
+    padding: 0.95rem 0.8rem;
+}
+
+body.home-view-active.compact-home-layout .feature-icon {
+    font-size: 2.6rem;
+    margin-bottom: 0.55rem;
+}
+
+body.home-view-active.compact-home-layout .feature-label {
+    font-size: 1.02rem;
+}
+
+body.home-view-active.compact-home-layout .feature-desc {
+    font-size: 0.84rem;
+    margin-top: 0.2rem;
+}
+
+@media (min-height: 900px) {
+    .button-grid {
+        width: min(620px, 100%);
+        max-width: 620px;
+        gap: 1rem;
+    }
 }
 
 @keyframes fadeInDown {

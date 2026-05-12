@@ -524,12 +524,18 @@ class KohaAPI {
     }
 
     async _backendGetItemsForRenew(patronCardNumber) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
         try {
-            const response = await fetch(`${this.config.backend.baseUrl}/renew/items?cardnumber=${encodeURIComponent(patronCardNumber)}`);
+            console.log(`[API] Fetching renew items for: ${patronCardNumber}`);
+            const response = await fetch(`${this.config.backend.baseUrl}/renew/items?cardnumber=${encodeURIComponent(patronCardNumber)}`, { signal: controller.signal });
+            clearTimeout(timeoutId);
             const result = await response.json();
             if (!result.success) throw new Error(result.message || 'Unable to fetch items');
             return result;
         } catch (error) {
+            clearTimeout(timeoutId);
+            if (error.name === 'AbortError') throw new Error('Request timed out. Please try again.');
             throw new Error(error.message || 'Unable to fetch items');
         }
     }

@@ -12,16 +12,7 @@ class LibraryKiosk {
         this.recentRfidTags = new Map();
         this.pendingCheckinBarcodes = new Set();
         this.processedCheckinBarcodes = new Set();
-        this.rfidArmState = null;
-        this.rfidArmPendingAfi = '';
-        this.rfidArmPendingPromise = null;
-        this.rfidArmGeneration = 0;
-
-        // ─ Renew module state ─────────────────────────────────────────────
-        this.renewPatronCard   = '';
-        this.renewItemsData    = null; // { patronName, patronCardNumber, items[] }
-        this.renewBatchResults = null; // [{ barcode, ok, itemTitle, newDueDate, message }]
-        this.lastTransaction   = null; // Receipt data captured after batch renew
+        this.lastTransaction = null; // Receipt data captured after batch renew
 
         this.init();
     }
@@ -32,43 +23,27 @@ class LibraryKiosk {
 
         // Setup UI event listeners
         this.setupEventListeners();
+        this.syncViewportLayoutState();
 
         // Update mode indicator
         this.updateModeIndicator();
-        this.isReconnecting = false;
-
-        // Handle Splash Screen (5 seconds minimum for fresh startup, shorter for refresh)
-        const splashStartTime = Date.now();
-        const splashSeen = sessionStorage.getItem('splash_seen');
-        const MIN_SPLASH_MS = splashSeen ? 1000 : 5000;
-        sessionStorage.setItem('splash_seen', 'true');
-
-        // Await initial health check on startup/refresh to ensure we don't 
-        // show the home view if items are disconnected.
-        // await this.startHealthCheck();
-
-
-
-        //await this.startHealthCheck();
-
-        // Wait for required duration
-        const elapsed = Date.now() - splashStartTime;
-        if (elapsed < MIN_SPLASH_MS) {
-            await this.delay(MIN_SPLASH_MS - elapsed);
-        }
-
-        // Hide splash screen
+        // Hide splash screen after loading animation (5s)
         const splash = document.getElementById('splash-screen');
         if (splash) {
-            splash.style.opacity = '0';
-            document.body.style.backgroundColor = ''; // Reverts inline hack to let index.css take over
             setTimeout(() => {
-                splash.style.visibility = 'hidden';
-            }, 800);
+                splash.style.opacity = '0';
+                document.body.style.backgroundColor = ''; // Reverts inline hack to let index.css take over
+                setTimeout(() => {
+                    splash.style.visibility = 'hidden';
+                }, 800);
+            }, 5000);
         }
 
         // Show home view
         this.showView('home');
+
+        // Start system health monitoring (offline screen triggering)
+        this.startHealthCheck();
 
         console.log(`Library Kiosk initialized in ${this.api.getMode().toUpperCase()} mode`);
     }
@@ -81,18 +56,20 @@ class LibraryKiosk {
                 if (!response.ok) throw new Error(`Backend unreachable (HTTP ${response.status})`);
 
                 const status = await response.json();
-
-                // Trigger offline if internet down OR bridge offline OR hardware disconnected
-                const isOnline = status.online !== false;
-                const rfidRunning = !status.rfid?.enabled || (status.rfid?.state === 'running' || status.rfid?.state === 'starting' || status.rfid?.state === 'compiling');
+                
+                // Trigger offline if internet down OR koha offline OR hardware disconnected
+                const isKohaOnline = status.online !== false;
+                const isInternetOnline = status.internet !== false;
+                const rfidRunning = !status.rfid?.enabled || status.rfid?.state === 'running';
                 const rfidHardwareConnected = !status.rfid?.enabled || status.rfid?.connected === true;
 
                 // Update UI indicators
-                this.updateOfflineStatusUI('internet', isOnline);
+                this.updateOfflineStatusUI('internet', isInternetOnline);
+                this.updateOfflineStatusUI('koha', isKohaOnline);
                 this.updateOfflineStatusUI('rfid', rfidRunning && rfidHardwareConnected);
 
-                if (!isOnline || !rfidRunning || !rfidHardwareConnected) {
-                    console.warn('[Kiosk] System error detected:', { isOnline, rfidRunning, rfidHardwareConnected, state: status.rfid?.state });
+                if (!isInternetOnline || !isKohaOnline || !rfidRunning || !rfidHardwareConnected) {
+                    console.warn('[Kiosk] System error detected:', { isInternetOnline, isKohaOnline, rfidRunning, rfidHardwareConnected, state: status.rfid?.state });
                     this.showOfflineScreen();
 
                     if (!rfidHardwareConnected) {
@@ -106,6 +83,7 @@ class LibraryKiosk {
             } catch (error) {
                 console.warn('[Kiosk] Health check failed:', error.message);
                 this.updateOfflineStatusUI('internet', false);
+                this.updateOfflineStatusUI('koha', false);
                 this.updateOfflineStatusUI('rfid', false);
                 this.showOfflineScreen();
             }
@@ -152,10 +130,12 @@ class LibraryKiosk {
     }
 
     async closeApplication() {
-        try {
-            await fetch('/api/quit');
-        } catch (_) {
-            // Probably already shutting down
+        if (window.electronAPI?.closeApp) {
+            try {
+                await window.electronAPI.closeApp();
+                return;
+            } catch (_) {
+            }
         }
         window.close();
     }
@@ -165,18 +145,33 @@ class LibraryKiosk {
         return new Promise((resolve) => setTimeout(resolve, waitMs));
     }
 
+    resetAutoLogout() {
+        if (this.autoLogoutTimer) clearTimeout(this.autoLogoutTimer);
+        const timeout = (CONFIG.ui?.autoLogoutSeconds || 60) * 1000;
+        if (this.currentView && this.currentView !== 'home') {
+            this.autoLogoutTimer = setTimeout(() => {
+                if (this.currentView !== 'home') {
+                    console.log(`[Kiosk] Session timed out after ${timeout/1000}s inactivity.`);
+                    this.showView('home');
+                }
+            }, timeout);
+        }
+    }
+
     setupEventListeners() {
         const click = () => { if (typeof KioskSounds !== 'undefined') KioskSounds.click(); };
 
-        // Main menu buttons
+        // Global session timeout resets on user activity
+        document.addEventListener('click', () => this.resetAutoLogout(), { capture: true });
+        document.addEventListener('touchstart', () => this.resetAutoLogout(), { capture: true });
+        document.addEventListener('keydown', () => this.resetAutoLogout(), { capture: true });
+        window.addEventListener('resize', () => this.syncViewportLayoutState());
+
+        // Main menu buttons — 4 modules: Checkout, Check-In, Renew, Account
         document.getElementById('btn-checkout')?.addEventListener('click', () => { click(); this.startCheckOut(); });
         document.getElementById('btn-checkin')?.addEventListener('click', () => { click(); this.startCheckIn(); });
         document.getElementById('btn-renew')?.addEventListener('click', () => { click(); this.startRenew(); });
         document.getElementById('btn-account')?.addEventListener('click', () => { click(); this.startAccount(); });
-
-        document.getElementById('btn-renew')?.addEventListener('click', () => { click(); this.showComingSoon('Renew'); });
-        document.getElementById('btn-account')?.addEventListener('click', () => { click(); this.startAccount(); });
-        document.getElementById('btn-search')?.addEventListener('click', () => { click(); this.startSearch(); });
 
         // Offline screen buttons
         document.getElementById('btn-reconnect')?.addEventListener('click', async () => {
@@ -212,20 +207,35 @@ class LibraryKiosk {
             }
         });
         document.getElementById('btn-close-app')?.addEventListener('click', () => { click(); this.closeApplication(); });
+        document.getElementById('btn-final-done')?.addEventListener('click', () => { click(); this.showView('home'); });
 
         // Form submissions
         document.getElementById('checkout-form')?.addEventListener('submit', (e) => { e.preventDefault(); this.handleConfirmCheckout(); });
         document.getElementById('btn-confirm-checkout')?.addEventListener('click', (e) => { e.preventDefault(); this.handleConfirmCheckout(); });
         document.getElementById('checkin-form')?.addEventListener('submit', (e) => this.handleCheckInSubmit(e));
         document.getElementById('account-form')?.addEventListener('submit', (e) => this.handleAccountSubmit(e));
-        document.getElementById('search-form')?.addEventListener('submit', (e) => this.handleSearchSubmit(e));
-
-
-        document.getElementById('search-form')?.addEventListener('submit', (e) => this.handleSearchSubmit(e));
 
         // HID Card Reader for My Account (keyboard wedge)
         this._setupHidCardReader();
 
+        // Manual card entry for My Account
+        document.getElementById('btn-account-manual-login')?.addEventListener('click', () => {
+            click();
+            const input = document.getElementById('account-manual-card');
+            this.submitPatronLogin(input?.value);
+        });
+        document.getElementById('account-manual-card')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === 'NumpadEnter' || e.key === 'Tab') {
+                e.preventDefault();
+                document.getElementById('btn-account-manual-login')?.click();
+            }
+        });
+        document.getElementById('patron-card')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === 'NumpadEnter' || e.key === 'Tab') {
+                e.preventDefault();
+                document.getElementById('btn-patron-continue')?.click();
+            }
+        });
         // Hold Modal
         document.getElementById('btn-cancel-hold')?.addEventListener('click', () => {
             click();
@@ -273,8 +283,6 @@ class LibraryKiosk {
                     e.preventDefault();
                     if (this.currentOperation === 'checkout') {
                         this.proceedToBookScan();
-                    if (this.currentOperation === 'checkout' && this.checkoutStagedBooks && this.checkoutStagedBooks.length > 0) {
-                        this.handleConfirmCheckout();
                     }
                 }
             });
@@ -282,6 +290,7 @@ class LibraryKiosk {
 
         // Done button for check-in
         document.getElementById('btn-done-checkin')?.addEventListener('click', () => { click(); this.handleDoneCheckIn(); });
+        document.getElementById('btn-final-done')?.addEventListener('click', () => { click(); this.showView('home'); });
 
         // Start Scanning button for check-in
         document.getElementById('btn-start-scanning')?.addEventListener('click', () => {
@@ -297,17 +306,65 @@ class LibraryKiosk {
         document.getElementById('btn-print-no')?.addEventListener('click', () => { click(); this.handlePrintReceipt(false); });
 
         // ATM Check-Out two-screen flow buttons
-        document.getElementById('btn-patron-continue')?.addEventListener('click', () => { click(); this.proceedToBookScan(); });
+        document.getElementById('btn-patron-continue')?.addEventListener('click', () => { click(); const input = document.getElementById('patron-card'); this.submitCheckoutPatron(input?.value); });
         document.getElementById('btn-checkout-go-account')?.addEventListener('click', () => { click(); this.handleGoToAccount(); });
         document.getElementById('btn-checkout-finished')?.addEventListener('click', () => { click(); this.handleCheckoutFinished(); });
         document.getElementById('btn-co-finish-overlay')?.addEventListener('click', () => { click(); this.hideCoFinishOverlay(); this.handleDoneCheckout(); });
+
+        // Renew module sub-listeners
+        document.getElementById('renew-items-back')?.addEventListener('click', () => { click(); this.startRenew(); });
+        document.getElementById('renew-select-all')?.addEventListener('click', () => { click(); this._toggleSelectAllRenew(true); });
+        document.getElementById('renew-clear-all')?.addEventListener('click', () => { click(); this._toggleSelectAllRenew(false); });
+        document.getElementById('btn-renew-selected')?.addEventListener('click', () => { click(); this.handleRenewSelected(); });
+        document.getElementById('btn-renew-account')?.addEventListener('click', () => { click(); this.handleRenewAccountBtn(); });
+        document.getElementById('btn-renew-finished')?.addEventListener('click', () => { click(); this._showPostReceiptThankYou(); });
+        document.getElementById('receipt-btn-back')?.addEventListener('click', () => {
+            click();
+            if (this.currentOperation === 'renew') this.showView('renew-results');
+            else if (this.currentOperation === 'checkout') this.showView('checkout-scan-books');
+            else if (this.currentOperation === 'checkin') this.showView('checkin');
+            else this.showView('home');
+        });
+
+        document.getElementById('renew-nonrenewable-toggle')?.addEventListener('click', () => {
+            click();
+            const list = document.getElementById('renew-nonrenewable-list');
+            const arrow = document.getElementById('renew-toggle-arrow');
+            if (list) list.classList.toggle('collapsed');
+            if (arrow) arrow.classList.toggle('collapsed');
+        });
+        document.querySelectorAll('.renew-receipt-choice').forEach((renewBtn) => {
+            renewBtn.addEventListener('click', () => {
+                click();
+                this.handleReceiptChoice(renewBtn.getAttribute('data-receipt'));
+            });
+        });
+
+        // Renew module manual entry
+        document.getElementById('btn-renew-patron-continue')?.addEventListener('click', () => {
+            click();
+            const input = document.getElementById('renew-patron-card');
+            const card = (input?.value || '').trim();
+            if (card) {
+                this.renewPatronCard = card;
+                console.log('[Renew] Manual continue clicked:', card);
+                void this._renewGoToConnecting(card);
+            } else {
+                this.showError('Please enter a card number.');
+            }
+        });
+        document.getElementById('renew-patron-card')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === 'NumpadEnter') {
+                e.preventDefault();
+                document.getElementById('btn-renew-patron-continue')?.click();
+            }
+        });
     }
 
     startCheckOut() {
         this.currentOperation = 'checkout';
         this.scanningEnabled = false;     // Book scanning starts only after patron card confirmed (Screen 2)
         this.checkoutSessionBooks = [];
-        this.checkoutStagedBooks = [];    // kept for legacy compat with renderCheckoutStagedBooks
         this.checkoutProcessedBarcodes = new Set();
         this.checkoutSessionPatronCard = '';
         this.checkoutSessionPatronName = '';
@@ -325,66 +382,94 @@ class LibraryKiosk {
         this.showView('checkout-scan-patron');
         this.resetAutoLogout();
         if (window.patronRfidService) window.patronRfidService.beginCheckoutSession();
-        document.getElementById('patron-card')?.focus();
-        // RFID bridge is armed when patron card is confirmed (proceedToBookScan)
+        setTimeout(() => document.getElementById('patron-card')?.focus(), 100);
+        // RFID bridge is armed when patron card is confirmed (submitCheckoutPatron)
     }
 
-    proceedToBookScan() {
-        const patronCard = (document.getElementById('patron-card')?.value || '').trim();
-        if (!patronCard) {
+    async submitCheckoutPatron(cardNumber) {
+        if (this._hidProcessing) return;
+        cardNumber = (cardNumber || '').replace(/[\s\r\n\t]/g, '').trim();
+        if (!cardNumber) {
             this.showError('Please scan or enter your library card number.');
-            document.getElementById('patron-card')?.focus();
+            setTimeout(() => document.getElementById('patron-card')?.focus(), 100);
             return;
         }
 
-        this.checkoutSessionPatronCard = patronCard;
-        this.checkoutSessionPatronName = '';
-        this.checkoutSessionBooks = [];
-        this.checkoutProcessedBarcodes = new Set();
-
-        // Update Screen 2 header
-        const patronDisplay = document.getElementById('co-patron-display');
-        if (patronDisplay) patronDisplay.textContent = `Patron: ${patronCard}`;
-
-        const countEl = document.getElementById('co-items-count');
-        if (countEl) countEl.textContent = '0';
-
-        // Reset book list to animated scanning prompt
-        const bookList = document.getElementById('co-book-list');
-        if (bookList) {
-            bookList.innerHTML = `
-                <div class="co-scan-prompt" id="co-scan-prompt">
-                    <div class="co-scan-rings">
-                        <div class="co-ring co-ring-1"></div>
-                        <div class="co-ring co-ring-2"></div>
-                        <div class="co-ring co-ring-3"></div>
-                        <span class="co-ring-icon">📡</span>
-                    </div>
-                    <p class="co-scan-prompt-text">Place books on the RFID reader</p>
-                </div>`;
+        this._hidProcessing = true;
+        const statusEl = document.getElementById('patron-rfid-status');
+        if (statusEl) {
+            statusEl.textContent = 'Verifying patron...';
+            statusEl.style.color = '#3b82f6';
         }
 
-        // Enable RFID book scanning
-        this.scanningEnabled = true;
-        if (window.rfidService) window.rfidService.resetSession();
+        try {
+            const result = await this.api.getAccount(cardNumber);
+            const name = result.data?.patronName || '';
+            
+            this.checkoutSessionPatronCard = cardNumber;
+            this.checkoutSessionPatronName = name;
+            this.checkoutSessionBooks = [];
+            this.checkoutProcessedBarcodes = new Set();
 
-        this.showView('checkout-scan-books');
-        this.resetAutoLogout();
+            const patronDisplay = document.getElementById('co-patron-display');
+            if (patronDisplay) patronDisplay.textContent = `Patron: ${name} (${cardNumber})`;
 
-        // Arm RFID bridge for checkout (AFI 0x00 = checked-out mark)
-        void this.armRfidBridge('00');
-        if (window.rfidService?.activateLiveScan) {
-            window.rfidService.activateLiveScan({
-                graceMs: 5000,
-                bootstrapPolls: 8,
-                bootstrapIntervalMs: 175
-            });
+            const countEl = document.getElementById('co-items-count');
+            if (countEl) countEl.textContent = '0';
+
+            const bookList = document.getElementById('co-book-list');
+            if (bookList) {
+                bookList.innerHTML = `
+                    <div class="co-scan-prompt" id="co-scan-prompt">
+                        <div class="co-scan-rings">
+                            <div class="co-ring co-ring-1"></div>
+                            <div class="co-ring co-ring-2"></div>
+                            <div class="co-ring co-ring-3"></div>
+                            <span class="co-ring-icon">📡</span>
+                        </div>
+                        <p class="co-scan-prompt-text">Place books on the RFID reader</p>
+                    </div>`;
+            }
+
+            this.scanningEnabled = true;
+            if (window.rfidService) window.rfidService.resetSession();
+
+            this.showView('checkout-scan-books');
+            this.resetAutoLogout();
+
+            void this.armRfidBridge('00');
+            if (window.rfidService?.activateLiveScan) {
+                window.rfidService.activateLiveScan({
+                    graceMs: 5000,
+                    bootstrapPolls: 8,
+                    bootstrapIntervalMs: 175
+                });
+            }
+        } catch (err) {
+            console.error('[Kiosk] Patron validation failed:', err.message);
+            this.showError(err.message || 'Invalid patron card.');
+            if (statusEl) {
+                statusEl.textContent = '❌ Invalid Card';
+                statusEl.style.color = '#ef4444';
+            }
+            setTimeout(() => {
+                const input = document.getElementById('patron-card');
+                if (input) { input.value = ''; input.focus(); }
+            }, 100);
+        } finally {
+            this._hidProcessing = false;
         }
     }
 
     handleCheckoutFinished() {
         if (!this.checkoutSessionBooks || this.checkoutSessionBooks.length === 0) {
-            this.showError('No books were successfully checked out. Please scan books on the reader first.');
+            // No successful checkouts — log any errors and go home gracefully
+            const errorCount = document.querySelectorAll('#co-book-list .co-book-error').length;
+            if (errorCount > 0) {
+                console.log(`[Kiosk] Finishing checkout with ${errorCount} error(s) and 0 successful issues.`);
+            }
+            void this.disarmRfidBridge(true);
+            this.showView('home');
             return;
         }
         this.handleDoneCheckout();
@@ -396,26 +481,24 @@ class LibraryKiosk {
         this.scanningEnabled = false;
         void this.disarmRfidBridge(true);
 
-        // Show beautiful loading transition
-        this.showView('checkout-account-loading');
-        await this.delay(1500);
-
         // Preserve patron card before startAccount() resets service state
         const savedPatronCard = this.checkoutSessionPatronCard;
 
-        // Navigate to account (sets currentOperation = 'account')
+        // Show beautiful loading transition first
+        this.showView('checkout-account-loading');
+        await this.delay(1500);
+
+        // Initialize account state
         this.startAccount();
 
-        // Pre-fill patron card and auto-trigger account lookup
+        // Since we already have the patron card from checkout,
+        // skip the "Scan your Library Card" login screen entirely
         if (savedPatronCard) {
-            const accountCardEl = document.getElementById('account-card');
-            if (accountCardEl) {
-                accountCardEl.value = savedPatronCard;
-                const accountForm = document.getElementById('account-form');
-                if (accountForm) {
-                    accountForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-                }
-            }
+            const loginScreen = document.getElementById('account-login-screen');
+            if (loginScreen) loginScreen.style.display = 'none';
+
+            // Go straight to account data fetch
+            void this.submitPatronLogin(savedPatronCard);
         }
     }
 
@@ -423,46 +506,33 @@ class LibraryKiosk {
         const overlay = document.getElementById('btn-co-finish-overlay');
         if (overlay) overlay.style.display = 'none';
         this.checkoutReturnAccount = false;
-        // Renew module — new 5-step multi-item flow
-        document.getElementById('renew-items-back')?.addEventListener('click', () => { click(); this.startRenew(); });
-        document.getElementById('renew-select-all')?.addEventListener('click', () => { click(); this._toggleSelectAllRenew(true); });
-        document.getElementById('renew-clear-all')?.addEventListener('click',  () => { click(); this._toggleSelectAllRenew(false); });
-        document.getElementById('btn-renew-selected')?.addEventListener('click', () => { click(); this.handleRenewSelected(); });
-        document.getElementById('btn-renew-account')?.addEventListener('click',  () => { click(); this.handleRenewAccountBtn(); });
-        document.getElementById('btn-renew-finished')?.addEventListener('click', () => { click(); this._resetReceiptScreen(); this.showView('renew-receipt'); });
-        document.getElementById('receipt-btn-back')?.addEventListener('click',   () => { click(); this.showView('renew-results'); });
-        document.getElementById('renew-nonrenewable-toggle')?.addEventListener('click', () => {
-            click();
-            const list  = document.getElementById('renew-nonrenewable-list');
-            const arrow = document.getElementById('renew-toggle-arrow');
-            if (list)  list.classList.toggle('collapsed');
-            if (arrow) arrow.classList.toggle('collapsed');
-        });
-        document.querySelectorAll('.renew-receipt-choice').forEach((btn) => {
-            btn.addEventListener('click', () => {
-                click();
-                this.handleReceiptChoice(btn.getAttribute('data-receipt'));
-            });
-        });
-    } // end setupEventListeners
+    }
 
     // ─── Renew Module ────────────────────────────────────────────────────────────
 
     /** Step 1: Initialise state and show patron scan screen. */
     startRenew() {
         this.currentOperation = 'renew';
-        this.scanningEnabled   = false;  // No item scanning in renew flow
-        this.renewPatronCard   = '';
-        this.renewItemsData    = null;
+        this.scanningEnabled = false;  // No item scanning in renew flow
+        this.renewPatronCard = '';
+        this.renewItemsData = null;
         this.renewBatchResults = null;
         this.recentRfidTags.clear();
 
-        if (window.rfidService)       window.rfidService.resetSession();
+        if (window.rfidService) window.rfidService.resetSession();
         if (window.patronRfidService) window.patronRfidService.resetSession();
 
         this.showView('renew-scan');
         this.resetAutoLogout();
         void this.disarmRfidBridge(true);
+
+        // Reset manual input
+        const manualInput = document.getElementById('renew-patron-card');
+        if (manualInput) {
+            manualInput.value = '';
+            setTimeout(() => manualInput.focus(), 100);
+        }
+
 
         // Put patron RFID reader into listen mode
         if (window.patronRfidService?.beginRenewSession) {
@@ -476,7 +546,7 @@ class LibraryKiosk {
      */
     handleRenewPatronScan(cardValue) {
         if (this.currentOperation !== 'renew') return;
-        if (this.currentView     !== 'renew-scan') return; // already advanced past scan
+        if (this.currentView !== 'renew-scan') return; // already advanced past scan
 
         const cleaned = String(cardValue || '').trim();
         if (!cleaned) return;
@@ -489,47 +559,60 @@ class LibraryKiosk {
 
     /** Step 2: Show connecting spinner, fetch items, enforce minimum display time. */
     async _renewGoToConnecting(patronCard) {
+        console.log('[Renew] Entering connecting state for:', patronCard);
         this.showView('renew-connecting');
+        const start = Date.now();
 
-        const MIN_SPINNER_MS = 1500;
-        const t0 = Date.now();
-        let itemsData  = null;
+        let itemsData = null;
         let fetchError = null;
-
         try {
             itemsData = await this.api.getItemsForRenew(patronCard);
+            console.log('[Renew] Items data response:', itemsData);
         } catch (err) {
+            console.error('[Renew] Fetch items error:', err);
             fetchError = err;
         }
 
-        // Enforce minimum spinner time so the transition doesn't flash
-        const elapsed = Date.now() - t0;
+        const elapsed = Date.now() - start;
+        const MIN_SPINNER_MS = 1500;
         if (elapsed < MIN_SPINNER_MS) await this.delay(MIN_SPINNER_MS - elapsed);
 
-        if (fetchError || !itemsData?.data) {
-            this.showError(fetchError?.message || 'Unable to load items. Please try again.');
+        if (fetchError || !itemsData?.success || !itemsData?.data) {
+            const msg = fetchError?.message || itemsData?.message || 'Unable to load items. Please try again.';
+            console.error('[Renew] Proceeding to error from connecting:', msg);
+            this.showError(msg);
             this.showView('renew-scan');
             return;
         }
 
         this.renewItemsData = itemsData.data;
-        this.showRenewItems(itemsData.data);
+        try {
+            this.showRenewItems(itemsData.data);
+        } catch (err) {
+            console.error('[Renew] Error in showRenewItems:', err);
+            this.showError('Application error displaying items. Please try again.');
+            this.showView('renew-scan');
+        }
     }
 
     /** Step 3: Render the Items Out screen (two-section layout). */
     showRenewItems(data) {
+        console.log('[Renew] Preparing items view:', data);
+        if (!data || !Array.isArray(data.items)) {
+            throw new Error('Invalid items data received');
+        }
         const { patronName, patronCardNumber, items } = data;
 
         // Update patron chip in header bar
         const chip = document.getElementById('renew-patron-chip');
-        if (chip) chip.textContent = `\u{1F464} ${patronName || patronCardNumber}`;
+        if (chip) chip.textContent = `👤 ${patronName || patronCardNumber}`;
 
         // Classify: renewable = true|null (unknown → treat as renewable); notRenewable = false
-        const renewableItems    = items.filter((i) => i.renewable !== false);
-        const notRenewableItems = items.filter((i) => i.renewable === false);
+        const renewableItems = items.filter((i) => i && i.renewable !== false);
+        const notRenewableItems = items.filter((i) => i && i.renewable === false);
 
         // ── Section A: Renewable ──────────────────────────────────────────
-        const renewableList  = document.getElementById('renew-renewable-list');
+        const renewableList = document.getElementById('renew-renewable-list');
         const noRenewableMsg = document.getElementById('renew-no-renewable');
         if (renewableList) {
             renewableList.innerHTML = '';
@@ -544,9 +627,9 @@ class LibraryKiosk {
         }
 
         // ── Section B: Not Renewable ──────────────────────────────────────
-        const nonRenewableList    = document.getElementById('renew-nonrenewable-list');
+        const nonRenewableList = document.getElementById('renew-nonrenewable-list');
         const nonRenewableSection = document.getElementById('renew-section-nonrenewable');
-        const countBadge          = document.getElementById('renew-nonrenewable-count');
+        const countBadge = document.getElementById('renew-nonrenewable-count');
         if (countBadge) countBadge.textContent = notRenewableItems.length;
         if (nonRenewableSection) {
             nonRenewableSection.style.display = notRenewableItems.length > 0 ? '' : 'none';
@@ -567,7 +650,7 @@ class LibraryKiosk {
 
     /** Build a single item row for the items-out list. */
     _buildRenewItemRow(item, idx, isRenewable) {
-        const title   = item.itemTitle || item.itemBarcode || 'Unknown Item';
+        const title = item.itemTitle || item.itemBarcode || 'Unknown Item';
         const barcode = item.itemBarcode || '';
         const dueDate = item.dueDate
             ? this.formatDate(this.parseCalendarDate(item.dueDate))
@@ -631,16 +714,16 @@ class LibraryKiosk {
 
             // Capture lastTransaction for receipt printing/emailing
             this.lastTransaction = {
-                transactionType   : 'RENEW',
-                timestamp         : new Date().toISOString(),
-                patronCardNumber  : this.renewPatronCard,
-                patronName        : this.renewItemsData?.patronName || '',
-                items             : this.renewBatchResults.map((r) => ({
-                    barcode    : r.barcode,
-                    title      : r.itemTitle || r.barcode,
-                    newDueDate : r.newDueDate || '',
-                    status     : r.ok ? 'renewed' : 'failed',
-                    message    : r.message || ''
+                transactionType: 'RENEW',
+                timestamp: new Date().toISOString(),
+                patronCardNumber: this.renewPatronCard,
+                patronName: this.renewItemsData?.patronName || '',
+                items: this.renewBatchResults.map((r) => ({
+                    barcode: r.barcode,
+                    title: r.itemTitle || r.barcode,
+                    newDueDate: r.newDueDate || '',
+                    status: r.ok ? 'renewed' : 'failed',
+                    message: r.message || ''
                 }))
             };
 
@@ -669,9 +752,9 @@ class LibraryKiosk {
         list.innerHTML = '';
 
         results.forEach((r, i) => {
-            const isOk      = r.ok === true;
-            const icon      = isOk ? '\u2705' : '\u274C';
-            const cls       = isOk ? 'success' : 'fail';
+            const isOk = r.ok === true;
+            const icon = isOk ? '\u2705' : '\u274C';
+            const cls = isOk ? 'success' : 'fail';
             const delayStyle = `animation-delay: ${i * 0.07}s;`;
 
             let statusText = '';
@@ -681,7 +764,7 @@ class LibraryKiosk {
                     : 'See receipt';
                 statusText = `Renewed \u2022 New due: ${formattedDue}`;
             } else {
-                statusText = r.message || 'Renewal failed. Please contact staff.';
+                statusText = ErrorNormalizer.normalize(r.message || r).userMessage;
             }
 
             list.insertAdjacentHTML('beforeend', `
@@ -712,7 +795,7 @@ class LibraryKiosk {
 
         // Reuse existing My Account view + infrastructure
         this.startAccount();
-        const cardInput = document.getElementById('account-card');
+        const cardInput = document.getElementById('account-manual-card');
         if (cardInput) cardInput.value = patronCard;
 
         this.showLoading('account', true);
@@ -727,51 +810,40 @@ class LibraryKiosk {
     }
 
     /**
-     * Receipt Options — handles all 4 choices with real functionality.
-     * Print:  generate receipt HTML → Electron silent print (or window.print fallback)
-     * Email:  not yet available; shows patron-friendly message and re-enables buttons
-     * Both:   print first, then report email status
-     * None:   clear state, go Home immediately
+     * Receipt Options
      */
     async handleReceiptChoice(choice) {
         if (choice === 'none') {
             this.lastTransaction = null;
-            this.showView('home');
+            this._showPostReceiptThankYou();
             return;
         }
 
         // Disable all buttons; mark selected one as loading
-        const selectedBtn = document.querySelector(`.renew-receipt-choice[data-receipt="${choice}"]`);
+        const selectedBtn = document.querySelector(`.renew-receipt-choice[id$="${choice}"]`);
         document.querySelectorAll('.renew-receipt-choice').forEach((btn) => {
             btn.disabled = true;
-            if (btn === selectedBtn) btn.classList.add('loading');
+            if (btn.id.endsWith(choice)) btn.classList.add('loading');
         });
 
-        if (choice === 'print') {
+        if (choice === 'print' || choice === 'both') {
             const r = await this._doPrintReceipt();
             document.querySelectorAll('.renew-receipt-choice').forEach((b) => b.classList.remove('loading'));
-            this._showReceiptStatus(r.ok, r.message);
-            if (!r.ok) {
+            
+            const msg = choice === 'both' 
+                ? (r.ok ? 'Receipt printed \u2713 | Email: not yet configured' : 'Print failed | Email: not yet configured')
+                : r.message;
+                
+            this._showReceiptStatus(r.ok, msg);
+            
+            if (r.ok) {
+                await this.delay(2500);
+                this.lastTransaction = null;
+                this._showPostReceiptThankYou();
+            } else {
                 // Failure: re-enable buttons so patron can choose another option
                 document.querySelectorAll('.renew-receipt-choice').forEach((b) => { b.disabled = false; });
-                return;
             }
-            await this.delay(2500);
-            this.lastTransaction = null;
-            this.showView('home');
-            return;
-        }
-
-        if (choice === 'both') {
-            const r = await this._doPrintReceipt();
-            document.querySelectorAll('.renew-receipt-choice').forEach((b) => b.classList.remove('loading'));
-            const combined = r.ok
-                ? 'Receipt printed \u2713  |  Email: not yet configured'
-                : `Print failed  |  Email: not yet configured`;
-            this._showReceiptStatus(r.ok, combined);
-            await this.delay(3000);
-            this.lastTransaction = null;
-            this.showView('home');
             return;
         }
 
@@ -783,19 +855,125 @@ class LibraryKiosk {
         }
     }
 
+    /**
+     * After receipt choice, show the appropriate thank-you screen:
+     *   - Check-in  → "Put books on shelf" success screen
+     *   - Checkout  → "Thank you for visiting" screen
+     *   - Renew     → Go home directly
+     */
+    /**
+     * After receipt choice, show the appropriate thank-you screen:
+     *   - Check-in  → "Thank you for visiting" screen (with shelf instruction)
+     *   - Checkout  → "Thank you for visiting" screen (with book animation)
+     *   - Renew     → "Thank you for visiting" screen (default)
+     */
+    _showPostReceiptThankYou() {
+        if (this.currentOperation === 'checkin') {
+            this.showCheckinSummary();
+        } else if (this.currentOperation === 'checkout') {
+            const count = this.checkoutSessionBooks?.length || 0;
+            this.showThankYouSummary(count, 'checkout');
+        } else if (this.currentOperation === 'renew') {
+            const count = this.renewBatchResults?.length || 0;
+            this.showThankYouSummary(count, 'renew');
+        } else {
+            // Unknown — go home
+            this.showView('home');
+        }
+    }
+
     /** Resets receipt screen to initial state (re-enable buttons, hide confirm). */
     _resetReceiptScreen() {
         document.querySelectorAll('.renew-receipt-choice').forEach((btn) => {
             btn.disabled = false;
             btn.classList.remove('loading');
         });
-        const confirmEl = document.getElementById('renew-receipt-confirm');
+        const confirmEl = document.getElementById('receipt-confirm');
         if (confirmEl) confirmEl.style.display = 'none';
+    }
+
+    _receiptWidth() {
+        return 32;
+    }
+
+    _receiptPlainText(value) {
+        return String(value ?? '')
+            .replace(/\r\n/g, '\n')
+            .replace(/\r/g, '\n')
+            .replace(/\n+/g, ' ')
+            .replace(/[^\x20-\x7E]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    _centerReceiptText(value, width = this._receiptWidth()) {
+        const text = this._receiptPlainText(value).slice(0, width);
+        if (!text) return '';
+        const leftPad = Math.max(0, Math.floor((width - text.length) / 2));
+        return `${' '.repeat(leftPad)}${text}`;
+    }
+
+    _wrapReceiptText(value, width = this._receiptWidth(), indent = '') {
+        const text = this._receiptPlainText(value);
+        if (!text) return [];
+
+        const words = text.split(' ');
+        const lines = [];
+        let current = indent;
+
+        words.forEach((word) => {
+            if (!word) return;
+
+            if (!current.trim()) {
+                if ((indent.length + word.length) <= width) {
+                    current = `${indent}${word}`;
+                    return;
+                }
+
+                let remaining = word;
+                while (remaining.length > (width - indent.length)) {
+                    lines.push(`${indent}${remaining.slice(0, width - indent.length)}`);
+                    remaining = remaining.slice(width - indent.length);
+                }
+                current = remaining ? `${indent}${remaining}` : indent;
+                return;
+            }
+
+            const nextValue = `${current} ${word}`;
+            if (nextValue.length <= width) {
+                current = nextValue;
+                return;
+            }
+
+            lines.push(current);
+
+            if ((indent.length + word.length) <= width) {
+                current = `${indent}${word}`;
+                return;
+            }
+
+            let remaining = word;
+            while (remaining.length > (width - indent.length)) {
+                lines.push(`${indent}${remaining.slice(0, width - indent.length)}`);
+                remaining = remaining.slice(width - indent.length);
+            }
+            current = remaining ? `${indent}${remaining}` : indent;
+        });
+
+        if (current.trim()) {
+            lines.push(current);
+        }
+
+        return lines;
+    }
+
+    _finalizeReceiptText(lines) {
+        return `${lines.filter((line) => line !== null && line !== undefined).join('\n').trim()}\n\n\n\n\n`;
     }
 
     /**
      * Executes the actual print action.
-     * Uses Electron's silentPrint IPC if available, falls back to window.open + print().
+     * Uses Electron's silentPrint IPC. Browser printing is intentionally disabled for kiosk flow.
      * @returns {{ ok: boolean, message: string }}
      */
     async _doPrintReceipt() {
@@ -803,13 +981,16 @@ class LibraryKiosk {
             return { ok: false, message: 'No transaction data available. Please try again.' };
         }
 
-        const html = this._generateReceiptHTML(this.lastTransaction);
+        const payload = {
+            html: this._generateReceiptHTML(this.lastTransaction),
+            text: this._generateReceiptText(this.lastTransaction)
+        };
 
         try {
             if (window.electronAPI?.silentPrint) {
-                const result = await window.electronAPI.silentPrint(html);
+                const result = await window.electronAPI.silentPrint(payload);
                 if (result?.success) {
-                    return { ok: true,  message: 'Receipt sent to printer \u2713' };
+                    return { ok: true, message: 'Receipt sent to printer \u2713' };
                 }
                 const reason = result?.error || 'Unknown print failure';
                 if (/cancel/i.test(reason)) {
@@ -818,27 +999,16 @@ class LibraryKiosk {
                 return { ok: false, message: `Printer error: ${reason}. Please try again or contact staff.` };
             }
 
-            // Browser / demo-mode fallback: open popup and call window.print()
-            const w = window.open('', '_blank', 'width=700,height=900');
-            if (w) {
-                w.document.write(html);
-                w.document.close();
-                w.focus();
-                w.print();
-                w.close();
-                return { ok: true, message: 'Print dialog opened \u2713' };
-            }
-            return { ok: false, message: 'Could not open print window. Check popup settings.' };
+            return { ok: false, message: 'Silent printing is available only in the desktop kiosk app.' };
         } catch (err) {
             return { ok: false, message: err.message || 'Print failed. Please contact staff.' };
         }
     }
 
-    /** Updates the confirm area with a success or failure status message. */
     _showReceiptStatus(success, message) {
-        const confirmEl   = document.getElementById('renew-receipt-confirm');
+        const confirmEl = document.getElementById('receipt-confirm');
         const confirmIcon = confirmEl?.querySelector('.renew-receipt-confirm-icon');
-        const confirmText = document.getElementById('renew-receipt-confirm-text');
+        const confirmText = document.getElementById('receipt-confirm-text');
 
         if (confirmIcon) {
             confirmIcon.textContent = success ? '\u2713' : '\u2717';
@@ -847,123 +1017,125 @@ class LibraryKiosk {
                 : 'linear-gradient(135deg, #ef4444, #dc2626)';
         }
         if (confirmText) confirmText.textContent = message;
-        if (confirmEl)   confirmEl.style.display  = 'flex';
+        if (confirmEl) confirmEl.style.display = 'flex';
     }
 
-    /**
-     * Generates a self-contained, printer-friendly HTML receipt string.
-     * No external dependencies — all CSS is inline so it prints identically
-     * whether sent to a receipt printer or a regular printer.
-     */
     _generateReceiptHTML(tx) {
-        const now       = new Date(tx.timestamp || Date.now());
-        const dateStr   = now.toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
-        const timeStr   = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+        const now = new Date(tx.timestamp || Date.now());
+        const dateStr = now.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const timeStr = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
         const patronStr = (tx.patronName || '').trim();
+        const collegeName = 'Punjabi University';
 
-        const rows = (tx.items || []).map((item) => {
-            const isRenewed  = item.status === 'renewed';
-            const statusCls  = isRenewed ? 'status-ok' : 'status-fail';
-            const statusText = isRenewed ? '\u2713 Renewed' : '\u2717 Not renewed';
-            const dueDisp    = item.newDueDate
-                ? this.formatDate(this.parseCalendarDate(item.newDueDate))
-                : (isRenewed ? 'See librarian' : '\u2014');
-            const title = String(item.title || item.barcode || 'Unknown item')
-                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            return `<tr><td>${title}</td><td class="${statusCls}">${statusText}</td><td>${dueDisp}</td></tr>`;
-        }).join('');
+        let itemNo = 0;
+        let booksHtml = '';
 
-        const renewedCount = (tx.items || []).filter((i) => i.status === 'renewed').length;
-        const totalCount   = (tx.items || []).length;
+        (tx.items || []).forEach(item => {
+            itemNo++;
+            const statusText = item.status === 'renewed' ? 'Renewed' : (item.status === 'checkedout' ? 'Checked Out' : (item.status === 'checkedin' ? 'Checked In' : 'Failed'));
+            
+            let dateLabel = '';
+            let dateValue = '';
+            
+            if (item.newDueDate || item.dueDate) {
+                dateLabel = 'Due: ';
+                dateValue = this.formatDate(this.parseCalendarDate(item.newDueDate || item.dueDate));
+            } else if (item.returnDate) {
+                dateLabel = 'Returned: ';
+                dateValue = this.formatDate(this.parseCalendarDate(item.returnDate));
+            }
 
-        return `<!DOCTYPE html><html lang="en"><head>
-<meta charset="UTF-8">
-<title>Renewal Receipt \u2014 ${dateStr}</title>
-<style>
-@page{margin:14mm;size:A4}
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,Helvetica,sans-serif;font-size:11pt;color:#111}
-.hdr{text-align:center;border-bottom:2px solid #222;padding-bottom:10px;margin-bottom:12px}
-.lib{font-size:17pt;font-weight:900;letter-spacing:-.3px}
-.rtype{font-size:11pt;color:#555;margin-top:3px}
-.meta{margin-bottom:12px;line-height:1.8}
-.meta strong{display:inline-block;min-width:75px}
-.summary{margin-bottom:10px;font-size:10.5pt;font-weight:bold}
-table{width:100%;border-collapse:collapse;margin-bottom:14px}
-th{background:#f3f3f3;border:1px solid #aaa;padding:5px 8px;font-size:10pt;text-align:left}
-td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
-.status-ok{color:#065f46;font-weight:bold}
-.status-fail{color:#991b1b;font-weight:bold}
-.ftr{text-align:center;font-size:9pt;color:#777;border-top:1px solid #ddd;padding-top:10px;margin-top:6px;line-height:1.7}
-</style></head>
-<body>
-<div class="hdr">
-  <div class="lib">Punjabi University Library</div>
-  <div class="rtype">Renewal Receipt</div>
-</div>
-<div class="meta">
-  <p><strong>Date:</strong> ${dateStr}</p>
-  <p><strong>Time:</strong> ${timeStr}</p>
-  ${patronStr ? `<p><strong>Patron:</strong> ${patronStr}</p>` : ''}
-</div>
-<p class="summary">Items renewed: ${renewedCount} of ${totalCount}</p>
-<table>
-<thead><tr><th style="width:54%">Item Title</th><th style="width:20%">Status</th><th style="width:26%">New Due Date</th></tr></thead>
-<tbody>${rows}</tbody>
-</table>
-<div class="ftr">
-  Thank you for using Punjabi University Library.<br>
-  Please return items on or before the due date shown.<br>
-  <em>Powered by SoCTeamup Semiconductors</em>
-</div>
-</body></html>`;
-    }
-
-    // ─── End Renew Module ─────────────────────────────────────────────────────────
-
-
-
-
-        document.getElementById('btn-final-done')?.addEventListener('click', () => {
-            click();
-            this.showView('home');
+            booksHtml += `
+                <div style="margin-bottom: 8px; border-bottom: 1px dashed #000; padding-bottom: 6px; font-size: 15px; line-height: 1.35; color: #000;">
+                    <div>${itemNo}. ${item.title || item.barcode || 'Unknown'}</div>
+                    <div>Barcode: ${item.barcode}</div>
+                    <div>Status: ${statusText}</div>
+                    ${dateValue ? `<div>${dateLabel}${dateValue}</div>` : ''}
+                </div>
+            `;
         });
+
+        const patronLine = tx.patronCardNumber
+            ? `<div style="text-align: left; font-size: 15px; line-height: 1.35; margin-bottom: 8px; color: #000;">Patron: ${patronStr || tx.patronCardNumber}<br>Card: ${tx.patronCardNumber}</div>`
+            : `<div style="text-align: left; font-size: 15px; line-height: 1.35; margin-bottom: 8px; color: #000;">Patron: N/A</div>`;
+
+        const actionTitle = tx.transactionType || 'TRANSACTION';
+
+        return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Library Receipt</title>
+        <style>@page { margin: 0; size: auto; } body { margin: 0; padding: 0; background-color: #fff; }</style>
+        </head><body>
+            <div id="thermal-print-container" style="width: 100%; max-width: 100%; font-family: 'Courier New', Courier, monospace; text-align: center; color: #000; padding: 0; margin: 0; overflow: hidden; word-wrap: break-word; font-size: 15px; line-height: 1.35;">
+                <div style="font-size: 20px; margin: 3px 0; color: #000;">${collegeName}</div>
+                <div style="font-size: 16px; margin: 3px 0; color: #000;">Smart Library Kiosk</div>
+                <div style="font-size: 14px; margin-bottom: 8px; color: #000;">==============================</div>
+                <div style="font-size: 14px; margin-bottom: 8px; color: #000;">${dateStr} ${timeStr}</div>
+                ${patronLine}
+                <div style="text-align: left; margin-bottom: 6px; border-bottom: 1px dashed #000; padding-bottom: 4px; font-size: 16px; color: #000;">
+                    ${actionTitle} (${(tx.items || []).length})
+                </div>
+                <div style="text-align: left; margin-top: 3px; color: #000;">
+                    ${booksHtml}
+                </div>
+                <div style="margin-top: 10px; font-size: 14px; color: #000;">==============================</div>
+                <div style="font-size: 15px; margin-top: 6px; color: #000;">Thank You</div>
+                <div style="font-size: 13px; color: #000; margin-top: 3px;">Powered by JIVESNA TECH</div>
+                <div style="height: 36px;"></div>
+            </div>
+        </body></html>`;
     }
 
-    startCheckOut() {
-        this.currentOperation = 'checkout';
-        this.scanningEnabled = true;
-        this.checkoutSessionBooks = [];
-        this.checkoutStagedBooks = [];
-        this.recentRfidTags.clear();
-        this.pendingCheckinBarcodes.clear();
-        this.processedCheckinBarcodes.clear();
-        if (window.rfidService) window.rfidService.resetSession();
-        if (window.patronRfidService) window.patronRfidService.resetSession();
-        document.getElementById('checkout-form')?.reset();
+    _generateReceiptText(tx) {
+        const now = new Date(tx.timestamp || Date.now());
+        const dateStr = now.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const timeStr = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+        const divider = '-'.repeat(this._receiptWidth());
+        const lines = [
+            this._centerReceiptText('Punjabi University'),
+            this._centerReceiptText('Smart Library Kiosk'),
+            divider,
+            `Date: ${dateStr}`,
+            `Time: ${timeStr}`,
+            divider
+        ];
 
-        this.renderCheckoutStagedBooks();
-
-        const btnConfirm = document.getElementById('btn-confirm-checkout');
-        if (btnConfirm) {
-            btnConfirm.enabled = true;
-            btnConfirm.innerHTML = `✓ Confirm Checkout <span id="checkout-item-count" style="background: rgba(255,255,255,0.25); border-radius: 50%; width: 24px; height: 24px; display: inline-flex; justify-content: center; align-items: center; font-size: 0.85rem;">0</span>`;
+        const patronDisplay = this._receiptPlainText(tx.patronName || tx.patronCardNumber || 'N/A');
+        lines.push(...this._wrapReceiptText(`Patron: ${patronDisplay}`));
+        if (tx.patronCardNumber) {
+            lines.push(...this._wrapReceiptText(`Card: ${tx.patronCardNumber}`));
         }
 
-        this.showView('checkout');
-        this.resetAutoLogout();
-        if (window.patronRfidService) window.patronRfidService.beginCheckoutSession();
-        document.getElementById('patron-card')?.focus();
+        const actionTitle = tx.transactionType || 'TRANSACTION';
+        lines.push(divider);
+        lines.push(...this._wrapReceiptText(`${actionTitle} (${(tx.items || []).length})`));
+        lines.push(divider);
 
-        void this.armRfidBridge('00');
+        (tx.items || []).forEach((item, index) => {
+            const statusText = item.status === 'renewed' ? 'Renewed' : (item.status === 'checkedout' ? 'Checked Out' : (item.status === 'checkedin' ? 'Checked In' : 'Failed'));
+            
+            let dateLabel = '';
+            let dateValue = '';
+            
+            if (item.newDueDate || item.dueDate) {
+                dateLabel = 'Due: ';
+                dateValue = this.formatDate(this.parseCalendarDate(item.newDueDate || item.dueDate));
+            } else if (item.returnDate) {
+                dateLabel = 'Returned: ';
+                dateValue = this.formatDate(this.parseCalendarDate(item.returnDate));
+            }
 
-        if (window.rfidService?.activateLiveScan) {
-            window.rfidService.activateLiveScan({
-                graceMs: 5000,
-                bootstrapPolls: 8,
-                bootstrapIntervalMs: 175
-            });
-        }
+            lines.push(...this._wrapReceiptText(`${index + 1}. ${item.title || item.barcode || 'Unknown'}`));
+            lines.push(...this._wrapReceiptText(`Barcode: ${item.barcode || 'N/A'}`));
+            lines.push(...this._wrapReceiptText(`Status: ${statusText}`));
+            if (dateValue) {
+                lines.push(...this._wrapReceiptText(`${dateLabel}${dateValue}`));
+            }
+            lines.push(divider);
+        });
+
+        lines.push(this._centerReceiptText('Thank You'));
+        lines.push(this._centerReceiptText('Powered by JIVESNA TECH'));
+
+        return this._finalizeReceiptText(lines);
     }
 
     startCheckIn() {
@@ -1006,12 +1178,6 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         this.processedCheckinBarcodes.clear();
         if (window.patronRfidService) window.patronRfidService.resetSession();
 
-        document.getElementById('account-form')?.reset();
-        const resultsContainer = document.getElementById('account-results');
-        if (resultsContainer) {
-            resultsContainer.innerHTML = '';
-            resultsContainer.style.display = 'none';
-        }
         // Reset UI to login screen
         const loginScreen = document.getElementById('account-login-screen');
         const dashboard = document.getElementById('account-dashboard');
@@ -1019,6 +1185,7 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         const statusEl = document.getElementById('account-reader-status');
         const errorEl = document.getElementById('account-reader-error');
         const hidInput = document.getElementById('account-hid-input');
+        const manualInput = document.getElementById('account-manual-card');
 
         if (loginScreen) loginScreen.style.display = 'flex';
         if (dashboard) dashboard.style.display = 'none';
@@ -1026,119 +1193,14 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Waiting for card\u2026 Place card on reader'; }
         if (errorEl) errorEl.style.display = 'none';
         if (hidInput) { hidInput.value = ''; }
+        if (manualInput) manualInput.value = '';
 
         this.showView('account');
         this.resetAutoLogout();
-        if (window.patronRfidService?.beginAccountSession) window.patronRfidService.beginAccountSession();
-        document.getElementById('account-card')?.focus();
-        void this.disarmRfidBridge(true);
-        void this.disarmRfidBridge(true);
 
-        // Auto-focus HID input
-        this._focusHidInput();
-    }
-
-    startSearch() {
-        this.currentOperation = 'search';
-        document.getElementById('search-form')?.reset();
-        const resultsContainer = document.getElementById('search-results');
-        if (resultsContainer) {
-            resultsContainer.innerHTML = '';
-            resultsContainer.style.display = 'none';
-        }
-
-        this.showView('account');
-        this.resetAutoLogout();
-        if (window.patronRfidService?.beginAccountSession) window.patronRfidService.beginAccountSession();
-        document.getElementById('account-card')?.focus();
-        void this.disarmRfidBridge(true);
-    }
-
-        this.showView('search');
-        this.resetAutoLogout();
-        void this.disarmRfidBridge(true);
-        document.getElementById('search-input')?.focus();
-    }
-
-    async handleSearchSubmit(e) {
-        e.preventDefault();
-        const query = document.getElementById('search-input')?.value.trim() || '';
-        if (!query) {
-            this.showError('Please enter a search query.');
-            return;
-        }
-
-        this.showLoading('search', true);
-        try {
-            const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
-            const payload = await response.json();
-            if (!response.ok || !payload.success) {
-                throw new Error(payload.message || 'Search failed');
-            }
-            this.displaySearchResults(payload.data || [], query);
-        } catch (error) {
-            this.showError(error.message || 'Unable to fetch search results');
-        } finally {
-            this.showLoading('search', false);
-        }
-    }
-
-    displaySearchResults(results, query) {
-        const container = document.getElementById('search-results');
-        if (!container) return;
-
-        if (!results || results.length === 0) {
-            container.innerHTML = `
-                <div class="account-empty">
-                    No results found for "${query}".
-                </div>
-            `;
-            container.style.display = 'block';
-            return;
-        }
-
-        let html = `
-            <div class="account-summary">
-                <div class="account-summary-header">
-                    <h2>Search Results</h2>
-                    <div class="account-card-number">Found ${results.length} matches</div>
-                </div>
-                <div class="account-loans-grid">
-        `;
-
-        results.forEach(book => {
-            const statusColor = book.status === 'available' ? 'var(--success)' : 'var(--warning)';
-            const statusText = book.status === 'available' ? 'Available' : 'Checked Out';
-            const statusColor = book.status === 'available' ? '#10b981' : '#f59e0b';
-            const statusText = book.status === 'available' ? 'Available' : 'Checked Out';
-            const holdBtn = book.status !== 'available'
-                ? `<button class="btn btn-primary btn-place-hold" data-barcode="${book.barcode}" data-title="${(book.title || '').replace(/"/g, '&quot;')}" style="margin-top: 0.75rem; padding: 0.4rem 1rem; border-radius: 8px; font-size: 0.85rem; background: #3b82f6; border: none; color: white; font-weight: 600; cursor: pointer;">📌 Place Hold</button>`
-                : '';
-            html += `
-                <div class="account-loan-card">
-                    <div class="account-loan-title">${book.title || 'Unknown Title'}</div>
-                    <div class="account-loan-meta">By ${book.author || 'Unknown Author'}</div>
-                    <div class="account-loan-meta">Barcode/ISBN: ${book.barcode || 'N/A'}</div>
-                    <div class="account-loan-meta" style="color: ${statusColor}; font-weight: 600; margin-top: 0.5rem;">● ${statusText}</div>
-                    ${holdBtn}
-                </div>
-            `;
-        });
-
-        html += `
-                </div>
-            </div>
-        `;
-
-        container.innerHTML = html;
-        container.style.display = 'block';
-
-        // Bind hold buttons
-        container.querySelectorAll('.btn-place-hold').forEach(btn => {
-            btn.addEventListener('click', () => {
-                this.openHoldModal(btn.dataset.barcode, btn.dataset.title);
-            });
-        });
+        // Arm reader for Account scanning (reads UID)
+        void this.armRfidBridge('account');
+        setTimeout(() => manualInput?.focus(), 100);
     }
 
     handleDoneCheckIn() {
@@ -1148,9 +1210,22 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
             return;
         }
 
-        this.printType = 'checkin';
+        // Capture lastTransaction for check-in receipt
+        this.lastTransaction = {
+            transactionType: 'CHECKED IN',
+            timestamp: new Date().toISOString(),
+            patronCardNumber: '',
+            patronName: '',
+            items: this.checkinSessionBooks.map((b) => ({
+                barcode: b.barcode,
+                title: b.title || b.barcode,
+                returnDate: b.returnDate || new Date().toISOString(),
+                status: 'checkedin'
+            }))
+        };
+
         void this.disarmRfidBridge(true);
-        this.showView('print-receipt');
+        this._showPostReceiptThankYou();
     }
 
     handleDoneCheckout() {
@@ -1160,64 +1235,73 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
             return;
         }
 
-        this.printType = 'checkout';
+        // Capture lastTransaction for checkout
+        this.lastTransaction = {
+            transactionType: 'CHECKED OUT',
+            timestamp: new Date().toISOString(),
+            patronCardNumber: this.checkoutSessionPatronCard,
+            patronName: this.checkoutSessionPatronName,
+            items: this.checkoutSessionBooks.map((b) => ({
+                barcode: b.barcode,
+                title: b.title || b.barcode,
+                dueDate: b.dueDate || '',
+                status: 'checkedout'
+            }))
+        };
+
         void this.disarmRfidBridge(true);
-        this.showView('print-receipt');
+        this._showPostReceiptThankYou();
     }
 
     async handlePrintReceipt(willPrint) {
         if (willPrint) {
+            let printed = true;
             if (this.printType === 'checkout') {
-                await this.executeSysPrint('checkout', {
-    handlePrintReceipt(willPrint) {
-        if (willPrint) {
-            if (this.printType === 'checkout') {
-                this.executeSysPrint('checkout', {
+                printed = await this.executeSysPrint('checkout', {
                     patronCard: this.checkoutSessionPatronCard,
                     patronName: this.checkoutSessionPatronName,
                     books: this.checkoutSessionBooks
                 });
             } else if (this.printType === 'checkin') {
-                await this.executeSysPrint('checkin', {
-                this.executeSysPrint('checkin', {
+                printed = await this.executeSysPrint('checkin', {
                     books: this.checkinSessionBooks
                 });
             }
+            if (!printed) return;
         }
 
         if (this.printType === 'checkout') {
             const count = this.checkoutSessionBooks?.length || 0;
-            this.showThankYouSummary(count);
+            this.showThankYouSummary(count, 'checkout');
         } else {
-            this.showThankYouSummary(this.checkinSessionCount);
-        }
-    }
-
-    async executeSysPrint(type, data) {
             this.showCheckinSummary();
         }
     }
 
-    executeSysPrint(type, data) {
-        const collegeName = "Punjabi University";
-        const dateStr = new Date().toLocaleString();
-        let booksHtml = '';
+    showCheckinSummary() {
+        this.showView('checkin-success');
+        this.resetAutoLogout();
+        
+        // Automated return home after 5 seconds
+        if (this.checkinTimeout) clearTimeout(this.checkinTimeout);
+        this.checkinTimeout = setTimeout(() => {
+            if (this.currentView === 'checkin-success') {
+                this.showView('home');
+            }
+        }, 5000);
+    }
 
-        data.books.forEach(book => {
-            booksHtml += `
-                <div style="margin-bottom: 8px; border-bottom: 1px dashed #666; padding-bottom: 4px;">
-                    <div><strong>Title:</strong> ${book.title}</div>
-                    <div><strong>Barcode:</strong> ${book.barcode}</div>
-                    ${book.patronNo ? `<div><strong>Patron No:</strong> ${book.patronNo}</div>` : ''}
-                    ${book.dueDate ? `<div><strong>Due:</strong> ${book.dueDate}</div>` : ''}
-                    ${book.returnDate ? `<div><strong>Returned:</strong> ${book.returnDate}</div>` : ''}
+    async executeSysPrint(type, data) {
+        const collegeName = 'Punjabi University';
+        const dateStr = new Date().toLocaleString();
         let itemNo = 0;
+        let booksHtml = '';
 
         data.books.forEach(book => {
             itemNo++;
             booksHtml += `
-                <div style="margin-bottom: 5px; border-bottom: 1px dashed #000; padding-bottom: 3px; font-size: 10px; color: #000;">
-                    <div><b>${itemNo}. ${book.title || 'Unknown'}</b></div>
+                <div style="margin-bottom: 8px; border-bottom: 1px dashed #000; padding-bottom: 6px; font-size: 15px; line-height: 1.35; color: #000;">
+                    <div>${itemNo}. ${book.title || 'Unknown'}</div>
                     <div>Barcode: ${book.barcode}</div>
                     ${book.patronNo ? `<div>Patron: ${book.patronNo}</div>` : ''}
                     ${type === 'checkout' ? (book.dueDate ? `<div>Due: ${book.dueDate}</div>` : '') : ''}
@@ -1226,140 +1310,111 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
             `;
         });
 
-        // Optimization: removed 'margin: 0 auto' and centering for strict thermal left-alignment.
-        // Fixed width to 80mm as requested for modern thermal printers (fits 58mm via @page zoom if needed).
-        const receiptContent = `
-            <div id="sys-print-receipt" style="font-family: 'Courier New', Courier, monospace; width: 80mm; color: #000; padding: 5px; margin: 0; box-sizing: border-box;">
-                <div style="text-align: center; margin-bottom: 10px;">
-                    <h2 style="font-size: 16px; margin: 4px 0; font-weight: bold;">${collegeName}</h2>
-                    <h2 style="font-size: 16px; margin: 4px 0; font-weight: bold;">Smart Library Kiosk</h2>
-                    <div style="font-size: 11px;">${dateStr}</div>
-                </div>
-                
-                ${data.patronCard ? `<div style="text-align: left; font-size: 12px; margin-bottom: 10px; font-weight: bold; border-bottom: 1px solid #000; padding-bottom: 4px;">Patron: ${data.patronName || data.patronCard} <br>Card: ${data.patronCard}</div>` : ''}
-                
-                <div style="text-align: left; font-weight: bold; margin-bottom: 6px; border-bottom: 1px dashed #000; padding-bottom: 4px;">
-                    ${type === 'checkout' ? 'Checked Out Items' : 'Checked In Items'}
-                </div>
-                
-                <div style="text-align: left; font-size: 11px;">
-                    ${booksHtml}
-                </div>
-                
-                <div style="margin-top: 15px; font-size: 11px; font-style: italic; text-align: center;">Thank you for visiting!</div>
-                <div style="margin-top: 20px;">.</div> <!-- Extra padding for thermal tear-off -->
-            </div>
-        `;
-
-        // Strictly use Electron physical print and handle connection errors.
-        if (window.electronAPI && window.electronAPI.printReceipt) {
-            const result = await window.electronAPI.printReceipt(receiptContent);
-            if (!result.success) {
-                console.error('[Kiosk] Printing failed:', result.error);
-                if (result.error === 'NO_PHYSICAL_PRINTER') {
-                    this.showError('No thermal printer found. Please notify staff.');
-                } else {
-                    this.showError(`Print error: ${result.error}`);
-                }
-            }
-        } else {
-            console.error('[Kiosk] Native printing API not found.');
-            this.showError('Printing unavailable: Native module missing.');
-        const receiptContent = `
-            <div id="sys-print-receipt" style="font-family: 'Courier New', Courier, monospace; text-align: center; width: 70mm; margin: 0 auto; color: #000; padding: 10px;">
-                <h2 style="font-size: 16px; margin: 4px 0; font-weight: bold;">${collegeName}</h2>
-                <h2 style="font-size: 16px; margin: 4px 0; font-weight: bold;">Smart Library Kiosk</h2>
-                <div style="font-size: 11px; margin-bottom: 12px;">${dateStr}</div>
-                ${data.patronCard ? `<div style="text-align: left; font-size: 12px; margin-bottom: 12px; font-weight: bold;">Patron: ${data.patronName || data.patronCard} <br>Card: ${data.patronCard}</div>` : ''}
-                <div style="text-align: left; font-weight: bold; margin-bottom: 6px; border-bottom: 1px dashed #000; padding-bottom: 4px;">
-                    ${type === 'checkout' ? 'Checked Out Items' : 'Checked In Items'}
-                </div>
-                <div style="text-align: left; font-size: 11px; margin-top: 6px;">
-                    ${booksHtml}
-                </div>
-                <div style="margin-top: 15px; font-size: 11px; font-style: italic; text-align: center;">Thank you for visiting!</div>
         const patronLine = data.patronCard
-            ? `<div style="text-align: left; font-size: 10px; margin-bottom: 6px; color: #000;"><b>Patron:</b> ${data.patronName || data.patronCard}<br><b>Card:</b> ${data.patronCard}</div>`
-            : `<div style="text-align: left; font-size: 10px; margin-bottom: 6px; color: #000;"><b>Patron:</b> N/A</div>`;
+            ? `<div style="text-align: left; font-size: 15px; line-height: 1.35; margin-bottom: 8px; color: #000;">Patron: ${data.patronName || data.patronCard}<br>Card: ${data.patronCard}</div>`
+            : `<div style="text-align: left; font-size: 15px; line-height: 1.35; margin-bottom: 8px; color: #000;">Patron: N/A</div>`;
 
         const actionTitle = type === 'checkout' ? 'CHECKED OUT' : 'CHECKED IN';
+        const receiptText = this._generateSystemReceiptText(type, data, dateStr);
 
         const receiptContent = `
-            <div id="thermal-print-container" style="width: 100%; max-width: 100%; font-family: 'Courier New', Courier, monospace; text-align: center; color: #000; padding: 0; margin: 0; overflow: hidden; word-wrap: break-word;">
-                <h2 style="font-size: 12px; margin: 2px 0; font-weight: bold; color: #000;">${collegeName}</h2>
-                <h2 style="font-size: 11px; margin: 2px 0; font-weight: bold; color: #000;">Smart Library Kiosk</h2>
-                <div style="font-size: 9px; margin-bottom: 6px; color: #000;">========================</div>
-                <div style="font-size: 9px; margin-bottom: 6px; color: #000;">${dateStr}</div>
+            <div id="thermal-print-container" style="width: 100%; max-width: 100%; font-family: 'Courier New', Courier, monospace; text-align: center; color: #000; padding: 0; margin: 0; overflow: hidden; word-wrap: break-word; font-size: 15px; line-height: 1.35;">
+                <div style="font-size: 20px; margin: 3px 0; color: #000;">${collegeName}</div>
+                <div style="font-size: 16px; margin: 3px 0; color: #000;">Smart Library Kiosk</div>
+                <div style="font-size: 14px; margin-bottom: 8px; color: #000;">==============================</div>
+                <div style="font-size: 14px; margin-bottom: 8px; color: #000;">${dateStr}</div>
                 ${patronLine}
-                <div style="text-align: left; font-weight: bold; margin-bottom: 3px; border-bottom: 1px dashed #000; padding-bottom: 2px; font-size: 10px; color: #000;">
+                <div style="text-align: left; margin-bottom: 6px; border-bottom: 1px dashed #000; padding-bottom: 4px; font-size: 16px; color: #000;">
                     ${actionTitle} (${data.books.length})
                 </div>
                 <div style="text-align: left; margin-top: 3px; color: #000;">
                     ${booksHtml}
                 </div>
-                <div style="margin-top: 8px; font-size: 9px; color: #000;">========================</div>
-                <div style="margin-top: 3px; font-size: 9px; font-style: italic; text-align: center; color: #000;">Thank you for visiting!</div>
-                <div style="margin-top: 2px; font-size: 8px; text-align: center; color: #000;">Powered by SoCTeamup</div>
-                <div style="margin-top: 6px;">&nbsp;</div>
+                <div style="margin-top: 10px; font-size: 14px; color: #000;">==============================</div>
+                <div style="margin-top: 6px; font-size: 15px; text-align: center; color: #000;">Thank you for visiting!</div>
+                <div style="margin-top: 3px; font-size: 13px; text-align: center; color: #000;">Powered by SoCTeamup</div>
+                <div style="height: 36px;"></div>
             </div>
         `;
 
-        // If running in Electron with preload script, use the secure IPC silent print
         if (window.electronAPI && window.electronAPI.silentPrint) {
-            window.electronAPI.silentPrint(receiptContent);
+            const result = await window.electronAPI.silentPrint({
+                html: receiptContent,
+                text: receiptText
+            });
+            if (!result?.success) {
+                const reason = result?.error || 'Unknown print failure';
+                console.error('[Kiosk] Printing failed:', reason);
+                this.showError(`Print error: ${reason}`);
+                return false;
+            }
+            return true;
         } else {
-            console.warn('[Kiosk] Electron API not found, falling back to browser print dialog.');
-
-            // Fallback for non-Electron testing
-            const printContainer = document.createElement('div');
-            printContainer.id = 'temp-print-container';
-            printContainer.innerHTML = receiptContent;
-            document.body.appendChild(printContainer);
-
-            const style = document.createElement('style');
-            style.id = 'temp-print-style';
-            style.innerHTML = `
-                @media print {
-                    body > * { display: none !important; }
-                    body > #temp-print-container { display: block !important; }
-                    @page { margin: 0; }
-                    #temp-print-container {
-                        width: 48mm;
-                        margin: 0;
-                        padding: 0;
-                    }
-                    @page { margin: 0; size: 48mm auto; }
-                }
-            `;
-            document.head.appendChild(style);
-
-            setTimeout(() => {
-                window.print();
-                setTimeout(() => {
-                    if (document.body.contains(printContainer)) document.body.removeChild(printContainer);
-                    if (document.head.contains(style)) document.head.removeChild(style);
-                }, 2000);
-            }, 100);
+            console.warn('[Kiosk] Electron API not found; silent printing is unavailable in browser mode.');
+            this.showError('Silent printing is available only in the desktop kiosk app.');
+            return false;
         }
     }
 
-    showThankYouSummary(count) {
-        const countSpan = document.getElementById('session-count');
-        if (countSpan) countSpan.textContent = count;
+    _generateSystemReceiptText(type, data, dateText) {
+        const divider = '-'.repeat(this._receiptWidth());
+        const actionTitle = type === 'checkout' ? 'CHECKED OUT' : 'CHECKED IN';
+        const lines = [
+            this._centerReceiptText('Punjabi University'),
+            this._centerReceiptText('Smart Library Kiosk'),
+            divider,
+            ...this._wrapReceiptText(`Date: ${dateText || new Date().toLocaleString()}`),
+            divider
+        ];
+
+        const patronValue = data.patronName || data.patronCard || 'N/A';
+        lines.push(...this._wrapReceiptText(`Patron: ${patronValue}`));
+        if (data.patronCard) {
+            lines.push(...this._wrapReceiptText(`Card: ${data.patronCard}`));
+        }
+
+        lines.push(divider);
+        lines.push(...this._wrapReceiptText(`${actionTitle} (${data.books.length})`));
+        lines.push(divider);
+
+        (data.books || []).forEach((book, index) => {
+            lines.push(...this._wrapReceiptText(`${index + 1}. ${book.title || 'Unknown'}`));
+            lines.push(...this._wrapReceiptText(`Barcode: ${book.barcode || 'N/A'}`));
+            if (book.patronNo) {
+                lines.push(...this._wrapReceiptText(`Patron: ${book.patronNo}`));
+            }
+            if (type === 'checkout' && book.dueDate) {
+                lines.push(...this._wrapReceiptText(`Due: ${book.dueDate}`));
+            }
+            if (type === 'checkin' && book.returnDate) {
+                lines.push(...this._wrapReceiptText(`Returned: ${book.returnDate}`));
+            }
+            lines.push(divider);
+        });
+
+        lines.push(this._centerReceiptText('Thank you for visiting!'));
+        lines.push(this._centerReceiptText('Powered by SoCTeamup'));
+
+        return this._finalizeReceiptText(lines);
+    }
 
     showThankYouSummary(count, type) {
-        const typeArg = type || this.printType || 'checkin';
+        const typeArg = type || this.currentOperation || 'checkin';
         const countSpan = document.getElementById('session-count');
         if (countSpan) countSpan.textContent = count;
 
         const actionText = document.getElementById('thankyou-action-text');
-        if (actionText) actionText.textContent = typeArg === 'checkout' ? 'checked out' : 'checked in';
-        
+        if (actionText) {
+            if (typeArg === 'checkout') actionText.textContent = 'checked out';
+            else if (typeArg === 'renew') actionText.textContent = 'renewed';
+            else actionText.textContent = 'checked in';
+        }
+
         const animCheckout = document.getElementById('thankyou-anim-checkout');
         const animCheckin = document.getElementById('thankyou-anim-checkin');
-        
+
         if (typeArg === 'checkout') {
-            if (animCheckout) animCheckout.style.display = 'block'; // Or flex depending on css
+            if (animCheckout) animCheckout.style.display = 'block';
             if (animCheckin) animCheckin.style.display = 'none';
         } else {
             if (animCheckout) animCheckout.style.display = 'none';
@@ -1380,14 +1435,25 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         this.showView('thankyou');
         if (typeof KioskSounds !== 'undefined') KioskSounds.celebration();
 
-        setTimeout(() => {
-            this.showView('home');
-        }, 3500);
+        if (this.thankyouTimeout) clearTimeout(this.thankyouTimeout);
+        this.thankyouTimeout = setTimeout(() => {
+            if (this.currentView === 'thankyou') {
+                this.showView('home');
+            }
+        }, 5000);
     }
 
     showCheckinSummary() {
         this.showView('checkin-success');
-        if (typeof KioskSounds !== 'undefined') KioskSounds.celebration();
+        this.resetAutoLogout();
+        
+        // Automated return home after 5 seconds
+        if (this.checkinTimeout) clearTimeout(this.checkinTimeout);
+        this.checkinTimeout = setTimeout(() => {
+            if (this.currentView === 'checkin-success') {
+                this.showView('home');
+            }
+        }, 5000);
     }
 
     async startScanning() {
@@ -1403,11 +1469,12 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         document.getElementById('item-barcode-checkin')?.focus();
         console.log('[Kiosk] Scanning start requested');
 
-        // Arm first so a tag already on the reader is republished as a fresh appearance.
+        // Keep the bridge disarmed during check-in scanning so tags are read immediately.
+        // The backend still writes AFI/security after a successful check-in.
         try {
-            await this.armRfidBridge('90');
+            await this.disarmRfidBridge(true);
         } catch (error) {
-            console.warn('[RFID] Continuing without confirmed arm:', error?.message || error);
+            console.warn('[RFID] Disarm before live scan failed:', error?.message || error);
         }
 
         this.scanningEnabled = true;
@@ -1500,106 +1567,6 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         }
     }
 
-    renderCheckoutStagedBooks() {
-        const container = document.getElementById('checkout-scanned-items');
-        if (!container) return;
-        container.innerHTML = '';
-
-        this.checkoutStagedBooks.forEach((book, index) => {
-            const el = document.createElement('div');
-            el.style.cssText = 'display: flex; justify-content: space-between; align-items: center; background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.75rem 1rem;';
-            el.innerHTML = `
-                <div style="display: flex; align-items: center; gap: 0.75rem;">
-                    <span style="font-size: 1.5rem; color: #64748b;">📖</span>
-                    <div>
-                        <div style="font-weight: 600; color: #0f172a; font-size: 0.95rem;">${book.barcode}</div>
-                        <div style="font-size: 0.8rem; color: #64748b;">UID: ${book.uid || 'N/A'}</div>
-                    </div>
-                </div>
-                <button type="button" class="remove-staged-btn" data-index="${index}" style="background: none; border: none; font-size: 1.5rem; color: #cbd5e1; cursor: pointer; line-height: 1;">×</button>
-            `;
-            container.appendChild(el);
-        });
-
-        const confirmBtn = document.getElementById('btn-confirm-checkout');
-        const countSpan = document.getElementById('checkout-item-count');
-        if (countSpan) countSpan.textContent = this.checkoutStagedBooks.length;
-        if (confirmBtn) {
-            confirmBtn.disabled = this.checkoutStagedBooks.length === 0;
-        }
-
-        // Bind remove handlers
-        container.querySelectorAll('.remove-staged-btn').forEach(btn => {
-            btn.onclick = (e) => {
-                const idx = parseInt(e.currentTarget.getAttribute('data-index'), 10);
-                this.checkoutStagedBooks.splice(idx, 1);
-                this.renderCheckoutStagedBooks();
-            };
-        });
-    }
-
-    async handleConfirmCheckout() {
-        const patronCard = document.getElementById('patron-card').value.trim();
-        if (!patronCard) {
-            this.showError('Please enter patron card number.');
-            return;
-        }
-
-        if (this.checkoutStagedBooks.length === 0) {
-            this.showError('No books scanned for checkout.');
-            return;
-        }
-
-        this.showLoading('checkout', true);
-        const confirmBtn = document.getElementById('btn-confirm-checkout');
-        if (confirmBtn) {
-            confirmBtn.disabled = true;
-            confirmBtn.innerHTML = '<span class="spinner"></span> Processing...';
-        }
-
-        let allSuccessful = true;
-        this.checkoutSessionBooks = [];
-        this.checkoutSessionPatronCard = patronCard;
-
-        for (const book of this.checkoutStagedBooks) {
-            try {
-                const result = await this.api.checkOut(patronCard, book.barcode, {
-                    rfidUid: book.uid,
-                    skipSecurityWrite: false
-                });
-
-                this.checkoutSessionBooks.push({
-                    title: result.data.itemTitle || book.barcode,
-                    barcode: book.barcode,
-                    dueDate: this.formatDate(this.parseCalendarDate(result.data.dueDate))
-                });
-                this.checkoutSessionPatronName = result.data.patronName || patronCard;
-
-                // Keep arming to ensure AFI resets gracefully
-                void this.armRfidBridge('00');
-            } catch (error) {
-                console.error('[Kiosk] Checkout error for', book.barcode, error);
-                this.showError(`Checkout failed for ${book.barcode}: ${error.message}`);
-                allSuccessful = false;
-            }
-        }
-
-        this.showLoading('checkout', false);
-
-        // Clear staged books so user isn't stuck clicking confirm infinitely
-        this.checkoutStagedBooks = [];
-        this.renderCheckoutStagedBooks();
-
-        // Print receipt for the successful ones and proceed
-        if (this.checkoutSessionBooks.length > 0) {
-            this.handleDoneCheckout();
-        } else {
-            this.showError("Checkout Aborted: All items failed. Returning to home...");
-            setTimeout(() => {
-                this.showView('home');
-            }, 3000);
-        }
-    }
 
     async processCheckoutTag({ barcode, uid }) {
         if (this.currentOperation !== 'checkout') return;
@@ -1673,16 +1640,11 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
                 <div class="co-book-icon-cell">❌</div>
                 <div class="co-book-info">
                     <div class="co-book-title">${barcode}</div>
-                    <div class="co-book-status">${error.message || 'Checkout failed'}</div>
+                    <div class="co-book-status">${ErrorNormalizer.normalize(error).userMessage}</div>
                 </div>
                 <div class="co-book-due">—</div>
             `;
             if (typeof KioskSounds !== 'undefined') KioskSounds.error();
-        const exists = this.checkoutStagedBooks.find(b => b.barcode === barcode);
-        if (!exists) {
-            this.checkoutStagedBooks.push({ barcode, uid: uid || '' });
-            this.renderCheckoutStagedBooks();
-            if (typeof KioskSounds !== 'undefined') KioskSounds.success();
         }
     }
 
@@ -1698,7 +1660,7 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
     async handleAccountSubmit(e) {
         e.preventDefault();
 
-        const patronCardNumber = document.getElementById('account-card')?.value.trim() || '';
+        const patronCardNumber = document.getElementById('account-manual-card')?.value.trim() || '';
         if (!patronCardNumber) {
             this.showError('Please enter patron card number.');
             return;
@@ -1725,106 +1687,6 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         const explicitUid = typeof input === 'object' && input ? String(input.uid || '').trim().toUpperCase() : '';
         if (!barcode) return;
         return this.processBarcodeWithRetry({ barcode, explicitUid });
-
-        // Keep check-in dedupe separate from the UID cache used to resolve live RFID reads.
-        if (this.pendingCheckinBarcodes.has(barcode) || this.processedCheckinBarcodes.has(barcode)) {
-            console.log(`[Kiosk] Skipping duplicate check-in for barcode: ${barcode}`);
-            return;
-        }
-        this.pendingCheckinBarcodes.add(barcode);
-
-        const rfidUid = explicitUid || this.consumeRfidUid(barcode);
-
-        const container = document.getElementById('checkin-results');
-        if (!container) return;
-
-        const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-        // Step 1: Create a "processing" card with progress bar
-        const card = document.createElement('div');
-        card.className = 'result-card processing';
-        card.innerHTML = `
-            <div class="status-icon">⏳</div>
-            <div class="card-info">
-                <div class="card-title">${barcode}</div>
-                <div class="card-status">Checking in…</div>
-                <div class="progress-bar-track"><div class="progress-bar-fill"></div></div>
-            </div>
-            <div class="card-time">${timestamp}</div>
-        `;
-        container.prepend(card);
-
-        // Step 2: Call check-in API (AFI was already written by the RFID bridge auto-write)
-        try {
-            // AFI pre-arm architecture: bridge already wrote AFI in the same cycle it detected the tag.
-            // Just call the SIP2 check-in — no security write needed here.
-            const result = await this.api.checkIn(barcode, {
-                rfidUid,
-                skipSecurityWrite: true
-            });
-            const displayName = (result.data && result.data.itemTitle && result.data.itemTitle !== 'Unknown')
-                ? result.data.itemTitle
-                : (result.data && result.data.itemBarcode) ? result.data.itemBarcode : barcode;
-
-            const patronName = (result.data && result.data.patronName) ? result.data.patronName : 'N/A';
-            const fineAmount = Number(result.data?.fineAmount);
-            const safeFineAmount = Number.isFinite(fineAmount) ? fineAmount : 0;
-            const securityUpdate = result.data?.securityUpdate || result.securityUpdate || null;
-            const patronHtml = `<div style="font-size: 0.9rem; margin-top: 4px; color: var(--text-muted);">Patron: ${patronName}</div>`;
-            const fineHtml = `<div style="font-size: 0.9rem; color: #ef4444; font-weight: 600;">Fine: Rs. ${safeFineAmount.toFixed(2)}</div>`;
-            const securityHtml = securityUpdate && securityUpdate.success !== true
-                ? `<div style="font-size: 0.9rem; color: #b45309; font-weight: 600;">Security write failed: ${securityUpdate.message || 'tag state not updated'}</div>`
-                : '';
-
-            // Flip to success
-            card.className = 'result-card success';
-            card.innerHTML = `
-                <div class="status-icon">✅</div>
-                <div class="card-info">
-                    <div class="card-title">${displayName}</div>
-                    <div class="card-status">✓ Check-in Successful</div>
-                    ${patronHtml}
-                    ${fineHtml}
-                    ${securityHtml}
-                </div>
-                <div class="card-time">${timestamp}</div>
-            `;
-            this.checkinSessionCount++;
-            this.processedCheckinBarcodes.add(barcode);
-            if (typeof KioskSounds !== 'undefined') KioskSounds.success();
-            this.triggerHardwareLED('SUCCESS');
-
-        } catch (error) {
-            // Extract barcode for display
-            let displayName = barcode;
-            if (error.itemBarcode) displayName = error.itemBarcode;
-            this.showError(error?.message || 'Check-in failed');
-
-            // Flip to error
-            card.className = 'result-card error';
-            card.innerHTML = `
-                <div class="status-icon">❌</div>
-                <div class="card-info">
-                    <div class="card-title">${displayName}</div>
-                    <div class="card-status">✗ Not Found</div>
-                </div>
-                <div class="card-time">${timestamp}</div>
-            `;
-            if (typeof KioskSounds !== 'undefined') KioskSounds.error();
-            this.triggerHardwareLED('ERROR');
-        } finally {
-            this.pendingCheckinBarcodes.delete(barcode);
-        }
-
-        // Re-trigger slide-in animation on flip
-        card.style.animation = 'none';
-        card.offsetHeight; // force reflow
-        card.style.animation = 'cardSlideIn 0.3s ease forwards';
-
-        // Limit to 10 cards
-        while (container.children.length > 10) {
-            container.removeChild(container.lastChild);
-        }
     }
 
     async processBarcodeWithRetry({ barcode, explicitUid = '' }) {
@@ -1905,7 +1767,7 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
                 <div class="status-icon">X</div>
                 <div class="card-info">
                     <div class="card-title">${displayName}</div>
-                    <div class="card-status">${error?.message || 'Check-in failed'}</div>
+                    <div class="card-status">${ErrorNormalizer.normalize(error).userMessage}</div>
                 </div>
                 <div class="card-time">${timestamp}</div>
             `;
@@ -1951,11 +1813,17 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
                     return;
                 } catch (error) {
                     lastError = error;
+                    const normalizedError = ErrorNormalizer.normalize(error);
+                    if (normalizedError.code === 'ITEM_NOT_FOUND') {
+                        break;
+                    }
                     if (attempt < maxAttempts) {
                         await this.delay(retryDelayMs);
                     }
                 }
             }
+            // Ensure we don't re-process this barcode in the same session even if it failed
+            this.processedCheckinBarcodes.add(barcode);
         } finally {
             this.pendingCheckinBarcodes.delete(barcode);
         }
@@ -1968,6 +1836,7 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
     }
 
     noteRfidTag(barcode, uid) {
+        this.resetAutoLogout();
         const normalizedBarcode = String(barcode || '').trim();
         const normalizedUid = String(uid || '').trim().toUpperCase();
         if (!normalizedBarcode || !normalizedUid) return;
@@ -2071,52 +1940,30 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         const loginScreen = document.getElementById('account-login-screen');
         const dashboard = document.getElementById('account-dashboard');
         if (loginScreen) loginScreen.style.display = 'none';
-        if (dashboard) dashboard.style.display = 'block';
+        if (dashboard) dashboard.style.display = 'flex';
+        if (window.patronRfidService?.pauseScanning) {
+            void window.patronRfidService.pauseScanning('Account loaded. Reader paused.');
+        }
 
         const patronName = String(data?.patronName || '').trim();
         const patronCardNumber = String(data?.patronCardNumber || '').trim();
         const fineAmount = Number(data?.fineAmount || 0) || 0;
         const loans = Array.isArray(data?.loans) ? data.loans : [];
-
-        const fineClass = fineAmount > 0 ? 'account-fine has-fine' : 'account-fine';
         const holds = Array.isArray(data?.holds) ? data.holds : [];
 
-        const fineColor = fineAmount > 0 ? '#ef4444' : '#10b981';
-        const fineLabel = fineAmount > 0 ? `₹${fineAmount.toFixed(2)}` : '₹0.00 — No Fines';
+        const fineLabel = fineAmount > 0 ? `\u20b9${fineAmount.toFixed(2)}` : '\u20b90.00 \u2014 No Fines';
 
         // Issued Books HTML
         const loansHtml = loans.length > 0
             ? loans.map((loan) => {
                 const title = String(loan?.itemTitle || loan?.itemBarcode || 'Unknown title').trim();
                 const barcode = String(loan?.itemBarcode || '').trim();
-                const dueDate = loan?.dueDate ? this.formatDate(this.parseCalendarDate(loan.dueDate)) : 'Not available';
-                return `
-                    <div class="account-loan-card">
-                        <div class="account-loan-title">${title}</div>
-                        <div class="account-loan-meta">Barcode: ${barcode || 'N/A'}</div>
-                        <div class="account-loan-meta">Due: ${dueDate}</div>
-                    </div>
-                `;
-            }).join('')
-            : '<div class="account-empty">No books are currently checked out on this account.</div>';
-
-        container.innerHTML = `
-            <div class="account-summary">
-                <div class="account-summary-header">
-                    <div>
-                        <h2>${patronName || patronCardNumber}</h2>
-                        <div class="account-card-number">Card Number: ${patronCardNumber}</div>
-                    </div>
-                    <div class="${fineClass}">Fine: Rs. ${fineAmount.toFixed(2)}</div>
-                </div>
-                <div class="account-section-title">Issued Books (${loans.length})</div>
-                <div class="account-loans-grid">${loansHtml}</div>
                 const dueDateRaw = loan?.dueDate;
                 const dueDate = dueDateRaw ? this.parseCalendarDate(dueDateRaw) : null;
                 const dueDateStr = dueDate && !isNaN(dueDate) ? this.formatDate(dueDate) : 'Not available';
                 const isOverdue = dueDate && !isNaN(dueDate) && dueDate < new Date();
                 const statusColor = isOverdue ? '#ef4444' : '#10b981';
-                const statusText = isOverdue ? '⚠ Overdue' : '✓ Normal';
+                const statusText = isOverdue ? '\u26a0 Overdue' : '\u2713 Normal';
                 return `
                     <div style="background: white; border-radius: 12px; padding: 1rem 1.25rem; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-left: 4px solid ${statusColor};">
                         <div style="font-weight: 700; font-size: 1rem; color: #1e293b; margin-bottom: 0.3rem;">${title}</div>
@@ -2142,7 +1989,7 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
                         <div style="font-weight: 700; font-size: 1rem; color: #1e293b; margin-bottom: 0.3rem;">${hold.title}</div>
                         <div style="font-size: 0.85rem; color: #64748b;">Position in Queue: ${hold.queuePosition}</div>
                         <div style="font-size: 0.85rem; color: #64748b;">Expires: ${hold.pickupDeadline}</div>
-                        <div style="font-size: 0.85rem; font-weight: 600; color: ${color}; margin-top: 0.3rem;">● ${hold.status}</div>
+                        <div style="font-size: 0.85rem; font-weight: 600; color: ${color}; margin-top: 0.3rem;">\u25cf ${hold.status}</div>
                     </div>
                 `;
             }).join('')
@@ -2152,7 +1999,7 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
             <!-- User Info Card -->
             <div style="background: linear-gradient(135deg, #3b82f6, #2563eb); border-radius: 16px; padding: 1.5rem 2rem; color: white; margin-bottom: 1.5rem; box-shadow: 0 8px 20px rgba(37,99,235,0.3);">
                 <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.75rem;">
-                    <div style="width: 52px; height: 52px; background: rgba(255,255,255,0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">👤</div>
+                    <div style="width: 52px; height: 52px; background: rgba(255,255,255,0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">\ud83d\udc64</div>
                     <div>
                         <div style="font-size: 1.4rem; font-weight: 700;">${patronName || patronCardNumber}</div>
                         <div style="font-size: 0.9rem; opacity: 0.85;">Card: ${patronCardNumber}</div>
@@ -2166,7 +2013,7 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
 
             <!-- Issued Books Section -->
             <div style="margin-bottom: 1.5rem;">
-                <h3 style="font-size: 1.1rem; color: #1e293b; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">📚 Issued Books <span style="background: #e0f2fe; color: #0369a1; font-size: 0.8rem; padding: 0.15rem 0.6rem; border-radius: 10px; font-weight: 600;">${loans.length}</span></h3>
+                <h3 style="font-size: 1.1rem; color: #1e293b; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">\ud83d\udcda Issued Books <span style="background: #e0f2fe; color: #0369a1; font-size: 0.8rem; padding: 0.15rem 0.6rem; border-radius: 10px; font-weight: 600;">${loans.length}</span></h3>
                 <div style="display: flex; flex-direction: column; gap: 0.75rem;">
                     ${loansHtml}
                 </div>
@@ -2174,7 +2021,7 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
 
             <!-- My Holds Section -->
             <div style="margin-bottom: 1rem;">
-                <h3 style="font-size: 1.1rem; color: #1e293b; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">📌 My Holds <span style="background: #fef3c7; color: #92400e; font-size: 0.8rem; padding: 0.15rem 0.6rem; border-radius: 10px; font-weight: 600;">${holds.length}</span></h3>
+                <h3 style="font-size: 1.1rem; color: #1e293b; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">\ud83d\udccd My Holds <span style="background: #fef3c7; color: #92400e; font-size: 0.8rem; padding: 0.15rem 0.6rem; border-radius: 10px; font-weight: 600;">${holds.length}</span></h3>
                 <div style="display: flex; flex-direction: column; gap: 0.75rem;">
                     ${holdsHtml}
                 </div>
@@ -2219,8 +2066,20 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
             }
         }
 
+        document.body.dataset.currentView = viewName;
+        document.body.classList.toggle('home-view-active', viewName === 'home');
+        this.syncViewportLayoutState();
+
         // Clear any error messages
         this.clearError();
+
+        // Start/Reset the auto-logout timer for the new view
+        this.resetAutoLogout();
+    }
+
+    syncViewportLayoutState() {
+        const compactHome = window.innerHeight <= 730;
+        document.body.classList.toggle('compact-home-layout', compactHome);
     }
 
     showLoading(formId, show) {
@@ -2233,11 +2092,20 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         }
     }
 
-    showError(message) {
+    showError(error) {
+        const normalized = ErrorNormalizer.normalize(error);
+
+        // Suppress background transaction/connection errors if we've already returned Home
+        if (this.currentView === 'home' && !this.currentOperation) {
+            if (['TRANSACTION_FAILED', 'CONNECTION_FAILURE', 'HARDWARE_ERROR'].includes(normalized.code)) {
+                console.warn('[Kiosk] Suppressing background error on Home screen:', normalized);
+                return;
+            }
+        }
         this.triggerHardwareLED('ERROR');
         const errorDiv = document.getElementById('error-message');
         if (errorDiv) {
-            errorDiv.textContent = message;
+            errorDiv.textContent = normalized.userMessage;
             errorDiv.classList.add('show');
 
             // Auto-hide after 5 seconds
@@ -2302,67 +2170,67 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         this.showError(`Switched to ${newMode.toUpperCase()} mode`);
     }
 
-    resetAutoLogout() {
-        if (this.autoLogoutTimer) {
-            clearTimeout(this.autoLogoutTimer);
-        }
 
-        if (CONFIG.ui.autoLogoutSeconds > 0) {
-            this.autoLogoutTimer = setTimeout(() => {
-                this.showView('home');
-            }, CONFIG.ui.autoLogoutSeconds * 1000);
-        }
-    }
 
-    /**
-     * Send command to Node.js backend to control ESP hardware
-     * @param {string} state - 'ON', 'OFF', 'SUCCESS', or 'ERROR'
-     */
     async triggerHardwareLED(state) {
         try {
-            await fetch('/api/hardware/led', {
+            const response = await fetch('/api/hardware/led', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ state })
             });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
         } catch (e) {
             console.warn('Failed to trigger hardware LED:', e);
         }
     }
 
-    // === HID Card Reader (Keyboard Wedge) for My Account ===
-    // Listens at document level so it works even without input focus.
-    // USB HID readers send keystrokes very fast (< 50ms apart) then Enter.
+    // === HID Card Reader (Keyboard Wedge) Fallback ===
+    // Listens at document level to capture input even without focus.
     _setupHidCardReader() {
         this._hidBuffer = '';
         this._hidLastKeyTime = 0;
         this._hidProcessing = false;
 
         document.addEventListener('keydown', (e) => {
-            // Only capture when on the account login screen
-            if (this.currentView !== 'account') return;
+            if (this.currentView !== 'account' && this.currentView !== 'checkout-scan-patron' && this.currentView !== 'renew-scan') return;
+            
             const loginScreen = document.getElementById('account-login-screen');
-            if (!loginScreen || loginScreen.style.display === 'none') return;
+            if (this.currentView === 'account' && (!loginScreen || loginScreen.style.display === 'none')) return;
             if (this._hidProcessing) return;
+            
+            // If focused on manual input, let the browser handle it entirely.
+            if (document.activeElement?.tagName === 'INPUT') {
+                this._hidBuffer = ''; 
+                return;
+            }
 
             const now = Date.now();
+            const delta = now - this._hidLastKeyTime;
 
-            if (e.key === 'Enter') {
+            if (e.key === 'Enter' || e.key === 'NumpadEnter' || e.key === 'Tab') {
                 e.preventDefault();
                 const cardId = this._hidBuffer.trim();
                 this._hidBuffer = '';
-                if (cardId.length >= 2) {
-                    this._handleHidCardRead(cardId);
+                
+                if (cardId.length > 0) {
+                    if (this.currentView === 'account') {
+                        this.submitPatronLogin(cardId);
+                    } else if (this.currentView === 'checkout-scan-patron') {
+                        this.submitCheckoutPatron(cardId);
+                    } else if (this.currentView === 'renew-scan') {
+                        this.handleRenewPatronScan(cardId);
+                    }
                 }
                 return;
             }
 
-            // Reset buffer if gap > 500ms (user is not using the reader)
-            if (now - this._hidLastKeyTime > 500) {
+            if (delta > 500) {
                 this._hidBuffer = '';
             }
 
-            // Accept only printable single characters
             if (e.key.length === 1) {
                 this._hidBuffer += e.key;
                 this._hidLastKeyTime = now;
@@ -2370,43 +2238,48 @@ td{border:1px solid #ccc;padding:5px 8px;font-size:10pt;vertical-align:top}
         });
     }
 
-    _focusHidInput() {
-        // No longer needed — document-level listener handles everything
+    /** Handler for Patron RFID Reader service (js/patron-rfid-service.js) */
+    _handleHidCardRead(cardNumber) {
+        console.log('[Reader Service] Patron card captured:', cardNumber);
+        this.submitPatronLogin(cardNumber);
     }
 
-    async _handleHidCardRead(cardId) {
+    async submitPatronLogin(cardNumber) {
         if (this._hidProcessing) return;
-        this._hidProcessing = true;
+        cardNumber = (cardNumber || '').replace(/[\s\r\n\t]/g, '').trim();
+        if (!cardNumber) {
+            this.showError('Please enter a valid card number.');
+            setTimeout(() => document.getElementById('account-manual-card')?.focus(), 100);
+            return;
+        }
 
+        this._hidProcessing = true;
         const statusEl = document.getElementById('account-reader-status');
         const errorEl = document.getElementById('account-reader-error');
 
-        console.log('[HID] Card scanned:', cardId);
+        console.log('[HID] Card scanned:', cardNumber);
 
-        // Show loading state
-        if (statusEl) { statusEl.textContent = 'Reading card\u2026'; statusEl.style.animation = 'none'; }
+        if (statusEl) { statusEl.textContent = 'Reading card…'; statusEl.style.animation = 'none'; }
         if (errorEl) errorEl.style.display = 'none';
 
         try {
-            const result = await this.api.getAccount(cardId);
+            const result = await this.api.getAccount(cardNumber);
             if (typeof KioskSounds !== 'undefined') KioskSounds.success();
             this.displayAccountSummary(result.data || {});
-        } catch (error) {
-            console.warn('[HID] Card login failed:', error.message);
+        } catch (err) {
+            console.error('Account lookup error:', err);
             if (typeof KioskSounds !== 'undefined') KioskSounds.error();
-
-            // Show error for 2 seconds
-            if (statusEl) statusEl.style.display = 'none';
-            if (errorEl) { errorEl.textContent = '\u274c Invalid Card'; errorEl.style.display = 'block'; }
-
+            if (errorEl) {
+                errorEl.textContent = '❌ ' + (err.message || 'Invalid Card');
+                errorEl.style.display = 'block';
+            }
+            if (statusEl) {
+                statusEl.textContent = 'Waiting for card…';
+            }
             setTimeout(() => {
-                if (errorEl) errorEl.style.display = 'none';
-                if (statusEl) {
-                    statusEl.textContent = 'Waiting for card\u2026 Place card on reader';
-                    statusEl.style.display = 'block';
-                    statusEl.style.animation = 'pulse-text 2s ease-in-out infinite';
-                }
-            }, 2000);
+                const input = document.getElementById('account-manual-card');
+                if (input) { input.value = ''; input.focus(); }
+            }, 100);
         } finally {
             this._hidProcessing = false;
         }
